@@ -20,6 +20,17 @@ export default function LocationPicker({ onConfirm }: Props) {
   const [picked, setPicked] = useState<{ lat: number; lng: number } | null>(null);
   const [locating, setLocating] = useState(false);
 
+  function applyLocation(map: LeafletMap, lat: number, lng: number) {
+    const rounded = { lat: Math.round(lat * 100000) / 100000, lng: Math.round(lng * 100000) / 100000 };
+    if (markerRef.current) {
+      markerRef.current.setLatLng([rounded.lat, rounded.lng]);
+    } else {
+      markerRef.current = L.marker([rounded.lat, rounded.lng]).addTo(map);
+    }
+    map.setView([rounded.lat, rounded.lng], 13);
+    setPicked(rounded);
+  }
+
   useEffect(() => {
     const container = containerRef.current;
     if (!container || mapRef.current) return;
@@ -42,21 +53,28 @@ export default function LocationPicker({ onConfirm }: Props) {
 
     map.on('click', (e) => {
       const { lat, lng } = e.latlng;
-      const rounded = { lat: Math.round(lat * 100000) / 100000, lng: Math.round(lng * 100000) / 100000 };
-
-      if (markerRef.current) {
-        markerRef.current.setLatLng([rounded.lat, rounded.lng]);
-      } else {
-        markerRef.current = L.marker([rounded.lat, rounded.lng]).addTo(map);
-      }
-      setPicked(rounded);
+      applyLocation(map, lat, lng);
     });
+
+    // Auto-locate on mount
+    if (navigator.geolocation) {
+      setLocating(true);
+      navigator.geolocation.getCurrentPosition(
+        ({ coords }) => {
+          applyLocation(map, coords.latitude, coords.longitude);
+          setLocating(false);
+        },
+        () => setLocating(false),
+        { timeout: 8000 },
+      );
+    }
 
     return () => {
       map.remove();
       mapRef.current = null;
       markerRef.current = null;
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function useGPS() {
@@ -64,20 +82,7 @@ export default function LocationPicker({ onConfirm }: Props) {
     setLocating(true);
     navigator.geolocation.getCurrentPosition(
       ({ coords }) => {
-        const rounded = {
-          lat: Math.round(coords.latitude * 100000) / 100000,
-          lng: Math.round(coords.longitude * 100000) / 100000,
-        };
-        const map = mapRef.current;
-        if (!map) return;
-
-        if (markerRef.current) {
-          markerRef.current.setLatLng([rounded.lat, rounded.lng]);
-        } else {
-          markerRef.current = L.marker([rounded.lat, rounded.lng]).addTo(map);
-        }
-        map.setView([rounded.lat, rounded.lng], 13);
-        setPicked(rounded);
+        if (mapRef.current) applyLocation(mapRef.current, coords.latitude, coords.longitude);
         setLocating(false);
       },
       () => setLocating(false),
