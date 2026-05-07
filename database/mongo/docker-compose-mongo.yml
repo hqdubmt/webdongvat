@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+
+  mongo:
+    image: mongo:latest
+    container_name: ${MONGO_CONTAINER_NAME}
+    restart: always
+
+    env_file:
+      - .env
+
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE}
+
+    ports:
+
+      - "${MONGO_PORT}:27017"
+
+    volumes:
+      - ./mongo-entrypoint:/docker-entrypoint-initdb.d
+      - mongo_data:/data/db
+
+volumes:
+  mongo_data:
+networks:
+  default:
+    name: mongo_network

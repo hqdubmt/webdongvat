@@ -1,0 +1,79 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPERADMIN
+  ADMIN
+  EDITOR
+}
+
+model User {
+  id          Int      @id @default(autoincrement())
+  username    String   @unique
+  password    String
+  displayName String   @map("display_name")
+  role        Role     @default(EDITOR)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+model Species {
+  id                 Int               @id @default(autoincrement())
+  slug               String            @unique
+  name               String
+  scientificName     String            @map("scientific_name")
+  description        String?
+  conservationStatus String?           @map("conservation_status")
+  createdAt          DateTime          @default(now()) @map("created_at")
+  updatedAt          DateTime          @updatedAt @map("updated_at")
+  images             SpeciesImage[]
+  locations          SpeciesLocation[]
+  videos             SpeciesVideo[]
+
+  @@map("species")
+}
+
+model SpeciesImage {
+  id        Int      @id @default(autoincrement())
+  speciesId Int      @map("species_id")
+  objectKey String   @map("object_key")
+  url       String
+  caption   String?
+  isPrimary Boolean  @default(false) @map("is_primary")
+  createdAt DateTime @default(now()) @map("created_at")
+  species   Species  @relation(fields: [speciesId], references: [id], onDelete: Cascade)
+
+  @@map("species_images")
+}
+
+model SpeciesLocation {
+  id        Int     @id @default(autoincrement())
+  speciesId Int     @map("species_id")
+  latitude  Float
+  longitude Float
+  placeName String? @map("place_name")
+  species   Species @relation(fields: [speciesId], references: [id], onDelete: Cascade)
+
+  @@map("species_locations")
+}
+
+model SpeciesVideo {
+  id        Int      @id @default(autoincrement())
+  speciesId Int      @map("species_id")
+  url       String
+  objectKey String?  @map("object_key")
+  title     String?
+  isPrimary Boolean  @default(false) @map("is_primary")
+  createdAt DateTime @default(now()) @map("created_at")
+  species   Species  @relation(fields: [speciesId], references: [id], onDelete: Cascade)
+
+  @@map("species_videos")
+}

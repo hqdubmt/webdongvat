@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p /root/quangdu/apps/web/src/app/admin/species/new /root/quangdu/apps/web/src/app/admin/species/\\\\[slug\\\\]/edit)",
+      "Read(//tmp/**)",
+      "Bash(python3 -c \"import json,sys; p=json.load\\(sys.stdin\\); print\\(json.dumps\\({**p.get\\('dependencies',{}\\), **p.get\\('devDependencies',{}\\)}, indent=2\\)\\)\")",
+      "Bash(node -e \"require\\('/root/quangdu/apps/web/node_modules/jose'\\)\")"
+    ],
+    "additionalDirectories": [
+      "/root/quangdu/apps/web/src/app/admin/species/[slug]"
+    ]
+  }
+}
