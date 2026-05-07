@@ -31,6 +31,7 @@ export default function NewSpeciesPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [slugManual, setSlugManual] = useState(false);
+  const [created, setCreated] = useState<{ slug: string; name: string } | null>(null);
 
   const [form, setForm] = useState({
     name: '',
@@ -101,11 +102,59 @@ export default function NewSpeciesPage() {
       }
 
       await revalidateCache(created.slug);
-      router.push(`/admin/species/${created.slug}/edit`);
+      setCreated({ slug: created.slug, name: created.name });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Có lỗi xảy ra');
       setSaving(false);
     }
+  }
+
+  if (created) {
+    return (
+      <div className="max-w-lg">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8 text-center space-y-4">
+          <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto">
+            <svg className="w-7 h-7 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">Tạo loài thành công!</h2>
+            <p className="text-gray-500 text-sm mt-1">
+              <span className="font-medium text-gray-700">{created.name}</span> đã được lưu vào hệ thống.
+            </p>
+          </div>
+          <div className="space-y-2 pt-2">
+            <a
+              href={`/species/${created.slug}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 w-full bg-green-600 hover:bg-green-700 text-white px-4 py-2.5 rounded-lg text-sm font-medium"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+              Xem trên trang công khai
+            </a>
+            <button
+              onClick={() => router.push(`/admin/species/${created.slug}/edit`)}
+              className="flex items-center justify-center gap-2 w-full bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2.5 rounded-lg text-sm font-medium"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+              Tiếp tục chỉnh sửa (thêm ảnh, tọa độ...)
+            </button>
+            <button
+              onClick={() => router.push('/admin')}
+              className="flex items-center justify-center gap-2 w-full text-gray-400 hover:text-gray-600 text-sm py-1"
+            >
+              ← Về danh sách loài
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
