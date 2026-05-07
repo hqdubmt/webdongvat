@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createSpecies, uploadImage, revalidateCache } from '@/lib/api';
 import ConservationInput from '@/components/ConservationInput';
@@ -24,6 +24,7 @@ export default function NewSpeciesPage() {
   const [error, setError] = useState('');
   const [slugManual, setSlugManual] = useState(false);
   const [created, setCreated] = useState<{ slug: string; name: string } | null>(null);
+  const [slugStatus, setSlugStatus] = useState<'idle' | 'checking' | 'taken' | 'free'>('idle');
 
   const [form, setForm] = useState({
     name: '',
@@ -53,6 +54,21 @@ export default function NewSpeciesPage() {
     setForm((prev) => ({ ...prev, slug: e.target.value }));
   }
 
+  useEffect(() => {
+    const slug = form.slug;
+    if (!slug) { setSlugStatus('idle'); return; }
+    setSlugStatus('checking');
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/species/${slug}`);
+        setSlugStatus(res.ok ? 'taken' : 'free');
+      } catch {
+        setSlugStatus('idle');
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [form.slug]);
+
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0] ?? null;
     setImageFile(file);
@@ -76,6 +92,10 @@ export default function NewSpeciesPage() {
     e.preventDefault();
     if (!form.name || !form.scientificName || !form.slug) {
       setError('Vui lòng điền đầy đủ tên loài, tên khoa học và slug.');
+      return;
+    }
+    if (slugStatus === 'taken') {
+      setError('Slug này đã tồn tại. Vui lòng chọn slug khác.');
       return;
     }
     setSaving(true);
@@ -185,22 +205,68 @@ export default function NewSpeciesPage() {
             placeholder="VD: Pseudoryx nghetinhensis"
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm italic focus:outline-none focus:ring-2 focus:ring-green-500"
           />
+          {form.scientificName && (
+            <div className="flex items-center gap-3 mt-1.5">
+              <span className="text-xs text-gray-400">Tra cứu:</span>
+              <a
+                href={`https://www.iucnredlist.org/search?query=${encodeURIComponent(form.scientificName)}`}
+                target="_blank" rel="noopener noreferrer"
+                className="text-xs text-red-600 hover:underline font-medium"
+              >
+                IUCN Red List ↗
+              </a>
+              <a
+                href={`https://en.wikipedia.org/wiki/${encodeURIComponent(form.scientificName.replace(/ /g, '_'))}`}
+                target="_blank" rel="noopener noreferrer"
+                className="text-xs text-blue-600 hover:underline font-medium"
+              >
+                Wikipedia ↗
+              </a>
+              <a
+                href={`https://www.google.com/search?q=${encodeURIComponent(form.scientificName + ' species')}`}
+                target="_blank" rel="noopener noreferrer"
+                className="text-xs text-gray-500 hover:underline font-medium"
+              >
+                Google ↗
+              </a>
+            </div>
+          )}
         </div>
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
             Slug (URL) <span className="text-red-500">*</span>
           </label>
-          <input
-            name="slug"
-            value={form.slug}
-            onChange={handleSlugChange}
-            placeholder="VD: sao-la"
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-green-500"
-          />
-          <p className="text-xs text-gray-400 mt-1">
-            Tự động tạo từ tên. Dùng cho URL: /species/<strong>{form.slug || '...'}</strong>
-          </p>
+          <div className="relative">
+            <input
+              name="slug"
+              value={form.slug}
+              onChange={handleSlugChange}
+              placeholder="VD: sao-la"
+              className={`w-full border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 pr-8 ${
+                slugStatus === 'taken' ? 'border-red-400 focus:ring-red-400' :
+                slugStatus === 'free' ? 'border-green-400 focus:ring-green-400' :
+                'border-gray-300 focus:ring-green-500'
+              }`}
+            />
+            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-sm">
+              {slugStatus === 'checking' && <svg className="animate-spin w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>}
+              {slugStatus === 'taken' && <span className="text-red-500">✕</span>}
+              {slugStatus === 'free' && <span className="text-green-500">✓</span>}
+            </span>
+          </div>
+          {slugStatus === 'taken' ? (
+            <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+              ⚠ Slug này đã tồn tại —{' '}
+              <a href={`/species/${form.slug}`} target="_blank" rel="noopener noreferrer" className="underline">
+                xem loài hiện có ↗
+              </a>
+            </p>
+          ) : (
+            <p className="text-xs text-gray-400 mt-1">
+              Tự động tạo từ tên. Dùng cho URL: /species/<strong>{form.slug || '...'}</strong>
+            </p>
+          )}
         </div>
 
         <div>
