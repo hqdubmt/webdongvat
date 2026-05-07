@@ -3,15 +3,7 @@
 import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { createSpecies, uploadImage, revalidateCache } from '@/lib/api';
-
-const CONSERVATION_OPTIONS = [
-  { value: '', label: 'Chưa đánh giá' },
-  { value: 'Cực kỳ nguy cấp (CR)', label: 'CR - Cực kỳ nguy cấp' },
-  { value: 'Nguy cấp (EN)', label: 'EN - Nguy cấp' },
-  { value: 'Sẽ nguy cấp (VU)', label: 'VU - Sẽ nguy cấp' },
-  { value: 'Ít lo ngại (LC)', label: 'LC - Ít lo ngại' },
-  { value: 'Thiếu dữ liệu (DD)', label: 'DD - Thiếu dữ liệu' },
-];
+import ConservationInput from '@/components/ConservationInput';
 
 function toSlug(str: string) {
   return str
@@ -213,16 +205,10 @@ export default function NewSpeciesPage() {
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Tình trạng bảo tồn</label>
-          <select
-            name="conservationStatus"
+          <ConservationInput
             value={form.conservationStatus}
-            onChange={handleChange}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-          >
-            {CONSERVATION_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
+            onChange={(v) => setForm((p) => ({ ...p, conservationStatus: v }))}
+          />
         </div>
 
         <div>

@@ -21,15 +21,7 @@ import {
   type SpeciesVideo,
 } from '@/lib/api';
 import LocationPickerWrapper from '@/components/LocationPickerWrapper';
-
-const CONSERVATION_OPTIONS = [
-  { value: '', label: 'Chưa đánh giá' },
-  { value: 'Cực kỳ nguy cấp (CR)', label: 'CR - Cực kỳ nguy cấp' },
-  { value: 'Nguy cấp (EN)', label: 'EN - Nguy cấp' },
-  { value: 'Sẽ nguy cấp (VU)', label: 'VU - Sẽ nguy cấp' },
-  { value: 'Ít lo ngại (LC)', label: 'LC - Ít lo ngại' },
-  { value: 'Thiếu dữ liệu (DD)', label: 'DD - Thiếu dữ liệu' },
-];
+import ConservationInput from '@/components/ConservationInput';
 
 export default function EditSpeciesPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -302,15 +294,10 @@ export default function EditSpeciesPage() {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Tình trạng bảo tồn</label>
-            <select
+            <ConservationInput
               value={form.conservationStatus}
-              onChange={(e) => setForm((p) => ({ ...p, conservationStatus: e.target.value }))}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-            >
-              {CONSERVATION_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
+              onChange={(v) => setForm((p) => ({ ...p, conservationStatus: v }))}
+            />
           </div>
 
           <div>
