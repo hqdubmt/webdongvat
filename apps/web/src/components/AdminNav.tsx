@@ -38,6 +38,7 @@ export default function AdminNav({ role, displayName }: AdminNavProps) {
             {role !== 'EDITOR' && (
               <Link href="/admin/species/new" className="hover:underline">+ Thêm loài mới</Link>
             )}
+            <Link href="/admin/library" className="hover:underline">Thư viện ảnh</Link>
             {isSuperadmin && (
               <Link href="/admin/users" className="hover:underline">Người dùng</Link>
             )}
@@ -73,6 +74,7 @@ export default function AdminNav({ role, displayName }: AdminNavProps) {
             {role !== 'EDITOR' && (
               <Link href="/admin/species/new" onClick={() => setOpen(false)} className="py-2.5 hover:text-green-200 transition-colors">+ Thêm loài mới</Link>
             )}
+            <Link href="/admin/library" onClick={() => setOpen(false)} className="py-2.5 hover:text-green-200 transition-colors">Thư viện ảnh</Link>
             {isSuperadmin && (
               <Link href="/admin/users" onClick={() => setOpen(false)} className="py-2.5 hover:text-green-200 transition-colors">Người dùng</Link>
             )}

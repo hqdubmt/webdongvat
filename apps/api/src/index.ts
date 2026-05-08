@@ -4,8 +4,9 @@ import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 import speciesRoutes from './routes/species';
 import userRoutes from './routes/users';
+import samplesRoutes from './routes/samples';
 import { errorHandler } from './middleware/errorHandler';
-import { requireSuperadmin } from './middleware/requireAuth';
+import { requireAuth, requireSuperadmin } from './middleware/requireAuth';
 import { seedSuperadmin } from './services/userSeed';
 
 dotenv.config();
@@ -29,6 +30,7 @@ app.get('/health', (_req, res) => {
 app.use('/api/species', speciesRoutes);
 app.use('/api/auth', userRoutes);
 app.use('/api/users', requireSuperadmin, userRoutes);
+app.use('/api/samples', requireAuth, samplesRoutes);
 
 // 404 handler
 app.use((_req, res) => {

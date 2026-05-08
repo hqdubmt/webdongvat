@@ -69,6 +69,26 @@ export default function NewSpeciesPage() {
   }
 
   useEffect(() => {
+    const prefill = sessionStorage.getItem('ai_prefill');
+    if (prefill) {
+      sessionStorage.removeItem('ai_prefill');
+      try {
+        const data: IdentifyResult & { imageUrl?: string } = JSON.parse(prefill);
+        setIdentified(data);
+        setForm((p) => ({
+          ...p,
+          name: data.name || p.name,
+          scientificName: data.scientificName || p.scientificName,
+          conservationStatus: data.conservationStatus || p.conservationStatus,
+          description: data.description || p.description,
+          slug: !slugManual && data.name ? toSlug(data.name) : p.slug,
+        }));
+      } catch { /* ignore */ }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     const slug = form.slug;
     if (!slug) { setSlugStatus('idle'); return; }
     setSlugStatus('checking');
