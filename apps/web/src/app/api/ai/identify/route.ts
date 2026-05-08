@@ -32,22 +32,41 @@ async function fetchLibraryImages(limit = 30): Promise<LibraryImage[]> {
   }
 }
 
-// Average hash (8x8 = 64 bits) — fast pixel-based similarity
-async function computeAHash(b64: string): Promise<boolean[]> {
-  const { data } = await sharp(Buffer.from(b64, 'base64'))
-    .resize(8, 8, { fit: 'fill' })
-    .grayscale()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-  const pixels = Array.from(data as Uint8Array);
-  const avg = pixels.reduce((a, b) => a + b, 0) / pixels.length;
-  return pixels.map(p => p >= avg);
+// Average hash (8x8 = 64 bits) — returns null if image is invalid
+async function computeAHash(b64: string): Promise<boolean[] | null> {
+  try {
+    const { data } = await sharp(Buffer.from(b64, 'base64'))
+      .resize(8, 8, { fit: 'fill' })
+      .grayscale()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const pixels = Array.from(data as Uint8Array);
+    const avg = pixels.reduce((a, b) => a + b, 0) / pixels.length;
+    return pixels.map(p => p >= avg);
+  } catch {
+    return null;
+  }
 }
 
 function hammingDistance(a: boolean[], b: boolean[]): number {
   let dist = 0;
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) dist++;
   return dist;
+}
+
+async function hashMatch(base64: string, libraryImages: LibraryImage[], threshold = 12): Promise<LibraryImage | null> {
+  const inputHash = await computeAHash(base64);
+  if (!inputHash) return null;
+
+  const entries: { img: LibraryImage; dist: number }[] = [];
+  await Promise.all(libraryImages.map(async (img) => {
+    const h = await computeAHash(img.b64);
+    if (h) entries.push({ img, dist: hammingDistance(inputHash, h) });
+  }));
+
+  if (!entries.length) return null;
+  const best = entries.reduce((a, b) => a.dist < b.dist ? a : b);
+  return best.dist <= threshold ? best.img : null;
 }
 
 export async function POST(req: NextRequest) {
@@ -61,38 +80,16 @@ export async function POST(req: NextRequest) {
 
   const libraryImages = await fetchLibraryImages(30);
 
-  // No API key — fallback to hash-based library matching
+  // No API key — offline hash-based library matching only
   if (!process.env.ANTHROPIC_API_KEY) {
     if (libraryImages.length === 0) {
-      return NextResponse.json({ found: false, note: 'Không có ảnh trong thư viện và chưa cấu hình ANTHROPIC_API_KEY.' });
+      return NextResponse.json({ found: false, note: 'Chưa có ảnh mẫu trong thư viện.' });
     }
-
-    const inputHash = await computeAHash(base64);
-    const hashes = await Promise.all(libraryImages.map(lib => computeAHash(lib.b64)));
-
-    let bestIdx = 0;
-    let bestDist = hammingDistance(inputHash, hashes[0]);
-    for (let i = 1; i < hashes.length; i++) {
-      const d = hammingDistance(inputHash, hashes[i]);
-      if (d < bestDist) { bestDist = d; bestIdx = i; }
+    const match = await hashMatch(base64, libraryImages);
+    if (match) {
+      return NextResponse.json({ found: true, fromLibrary: true, name: match.name, scientificName: match.scientificName || '', conservationStatus: match.conservationStatus || '', description: match.description || '', confidence: 'high', ...(match.link ? { libraryLink: match.link } : {}) });
     }
-
-    const THRESHOLD = 12;
-    if (bestDist <= THRESHOLD) {
-      const match = libraryImages[bestIdx];
-      return NextResponse.json({
-        found: true,
-        fromLibrary: true,
-        name: match.name,
-        scientificName: match.scientificName || '',
-        conservationStatus: match.conservationStatus || '',
-        description: match.description || '',
-        confidence: bestDist <= 5 ? 'high' : 'medium',
-        ...(match.link ? { libraryLink: match.link } : {}),
-      });
-    }
-
-    return NextResponse.json({ found: false, note: 'Không tìm thấy ảnh khớp trong thư viện. Thêm ANTHROPIC_API_KEY để nhận dạng ảnh mới.' });
+    return NextResponse.json({ found: false, note: 'Không tìm thấy ảnh khớp trong thư viện.' });
   }
 
   let messageContent: Anthropic.ContentBlockParam[];
@@ -184,30 +181,10 @@ Trả về JSON thuần (không markdown):
     return NextResponse.json(json);
   } catch {
     // API failed (credits, network, etc.) — fall back to hash matching
-    if (libraryImages.length === 0) {
-      return NextResponse.json({ found: false, note: 'API không khả dụng và chưa có ảnh trong thư viện.' });
+    const match = await hashMatch(base64, libraryImages);
+    if (match) {
+      return NextResponse.json({ found: true, fromLibrary: true, name: match.name, scientificName: match.scientificName || '', conservationStatus: match.conservationStatus || '', description: match.description || '', confidence: 'high', ...(match.link ? { libraryLink: match.link } : {}) });
     }
-    const inputHash = await computeAHash(base64);
-    const hashes = await Promise.all(libraryImages.map(lib => computeAHash(lib.b64)));
-    let bestIdx = 0;
-    let bestDist = hammingDistance(inputHash, hashes[0]);
-    for (let i = 1; i < hashes.length; i++) {
-      const d = hammingDistance(inputHash, hashes[i]);
-      if (d < bestDist) { bestDist = d; bestIdx = i; }
-    }
-    if (bestDist <= 12) {
-      const match = libraryImages[bestIdx];
-      return NextResponse.json({
-        found: true,
-        fromLibrary: true,
-        name: match.name,
-        scientificName: match.scientificName || '',
-        conservationStatus: match.conservationStatus || '',
-        description: match.description || '',
-        confidence: bestDist <= 5 ? 'high' : 'medium',
-        ...(match.link ? { libraryLink: match.link } : {}),
-      });
-    }
-    return NextResponse.json({ found: false, note: 'API không khả dụng. Không tìm thấy ảnh khớp trong thư viện.' });
+    return NextResponse.json({ found: false, note: libraryImages.length === 0 ? 'API không khả dụng và chưa có ảnh mẫu trong thư viện.' : 'Không tìm thấy ảnh khớp trong thư viện.' });
   }
 }
