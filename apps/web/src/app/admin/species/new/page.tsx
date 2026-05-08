@@ -7,6 +7,8 @@ import ConservationInput from '@/components/ConservationInput';
 
 interface IdentifyResult {
   found: boolean;
+  fromLibrary?: boolean;
+  libraryLink?: string;
   name?: string;
   scientificName?: string;
   conservationStatus?: string;
@@ -269,8 +271,14 @@ export default function NewSpeciesPage() {
                   {identified.conservationStatus && <p><span className="text-gray-500">Tình trạng:</span> {identified.conservationStatus}</p>}
                   {identified.description && <p className="text-gray-600 text-xs mt-1">{identified.description}</p>}
                   {identified.confidence && <p className="text-xs text-gray-400 mt-1">Độ tin cậy: <span className={identified.confidence === 'high' ? 'text-green-600' : identified.confidence === 'medium' ? 'text-yellow-600' : 'text-red-500'}>{identified.confidence === 'high' ? 'Cao' : identified.confidence === 'medium' ? 'Trung bình' : 'Thấp'}</span></p>}
+                  {identified.fromLibrary && <p className="text-xs font-medium text-blue-700 mt-1">Đã có trong thư viện của bạn</p>}
                 </div>
-                {identified.sources && identified.sources.length > 0 && (
+                {identified.fromLibrary && identified.libraryLink ? (
+                  <div className="mb-3 pt-2 border-t border-purple-200">
+                    <a href={identified.libraryLink} target="_blank" rel="noopener noreferrer"
+                      className="text-xs text-blue-600 hover:underline font-medium">Bài viết tham khảo ↗</a>
+                  </div>
+                ) : identified.sources && identified.sources.length > 0 ? (
                   <div className="mb-3 pt-2 border-t border-purple-200">
                     <p className="text-xs text-gray-400 mb-1.5">Nguồn tham khảo:</p>
                     <div className="flex flex-wrap gap-2">
@@ -282,7 +290,7 @@ export default function NewSpeciesPage() {
                       ))}
                     </div>
                   </div>
-                )}
+                ) : null}
                 <div className="flex gap-2">
                   <button type="button" onClick={applyIdentified} className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-md text-xs font-medium">Điền vào form</button>
                   <button type="button" onClick={() => setIdentified(null)} className="text-gray-400 hover:text-gray-600 text-xs px-2">Bỏ qua</button>

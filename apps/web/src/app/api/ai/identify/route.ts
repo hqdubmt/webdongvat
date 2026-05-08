@@ -3,8 +3,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getClient, BUCKET, readSampleIndex } from '@/lib/minio';
 import sharp from 'sharp';
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
 type LibraryImage = { name: string; scientificName?: string; conservationStatus?: string; description?: string; link?: string; b64: string; mediaType: string };
 
 async function fetchLibraryImages(limit = 30): Promise<LibraryImage[]> {
@@ -164,6 +162,7 @@ Trả về JSON thuần (không markdown):
     ];
   }
 
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   const message = await client.messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 1024,
