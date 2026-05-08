@@ -91,9 +91,9 @@ export default function SplitView({ species }: { species: Species[] }) {
     try {
       const res = await fetch('/api/ai/identify', { method: 'POST', body: fd });
       const data = await res.json();
-      // Try to match against local species list
-      let matchedSlug: string | undefined;
-      if (data.found && (data.scientificName || data.name)) {
+      // Use slug from API (species DB match) or fall back to name matching
+      let matchedSlug: string | undefined = data.matchedSlug;
+      if (!matchedSlug && data.found && (data.scientificName || data.name)) {
         const sciLower = data.scientificName?.toLowerCase() ?? '';
         const nameLower = data.name?.toLowerCase() ?? '';
         const match = species.find(
