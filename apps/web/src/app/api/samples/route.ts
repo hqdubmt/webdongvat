@@ -20,12 +20,13 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const authHeader = await getAuthHeader();
-  const formData = await req.formData();
+  const contentType = req.headers.get('content-type') || '';
+  const body = await req.arrayBuffer();
 
   const res = await fetch(`${API_BASE}/api/samples`, {
     method: 'POST',
-    headers: authHeader,
-    body: formData,
+    headers: { ...authHeader, 'content-type': contentType },
+    body: Buffer.from(body),
   });
   const data = await res.json();
   return NextResponse.json(data, { status: res.status });

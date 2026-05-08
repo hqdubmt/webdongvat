@@ -32,6 +32,7 @@ export default function LibraryPage() {
   const [scanResults, setScanResults] = useState<Record<string, ScanResult>>({});
 
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState('');
 
   const fetchImages = useCallback(async () => {
     try {
@@ -51,11 +52,19 @@ export default function LibraryPage() {
     const files = e.target.files;
     if (!files || files.length === 0) return;
     setUploading(true);
+    setUploadError('');
     try {
       const fd = new FormData();
       Array.from(files).forEach((f) => fd.append('images', f));
-      await fetch('/api/samples', { method: 'POST', body: fd });
+      const res = await fetch('/api/samples', { method: 'POST', body: fd });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setUploadError(err.error || `Lỗi ${res.status}`);
+        return;
+      }
       await fetchImages();
+    } catch {
+      setUploadError('Lỗi kết nối, thử lại.');
     } finally {
       setUploading(false);
       if (uploadRef.current) uploadRef.current.value = '';
@@ -113,6 +122,13 @@ export default function LibraryPage() {
           <input ref={uploadRef} type="file" accept="image/*" multiple className="hidden" onChange={handleUpload} disabled={uploading} />
         </label>
       </div>
+
+      {uploadError && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm flex items-center justify-between">
+          <span>{uploadError}</span>
+          <button onClick={() => setUploadError('')} className="text-red-400 hover:text-red-600 ml-3">✕</button>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center h-48 text-gray-400">
