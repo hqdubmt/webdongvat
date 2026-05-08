@@ -7,6 +7,8 @@ import SpeciesDetailPanel from './SpeciesDetailPanel';
 
 interface ScanResult {
   found: boolean;
+  fromLibrary?: boolean;
+  libraryLink?: string;
   name?: string;
   scientificName?: string;
   conservationStatus?: string;
@@ -188,18 +190,21 @@ export default function SplitView({ species }: { species: Species[] }) {
                   ) : (
                     <p className="text-gray-400 italic">Chưa có trong hệ thống.</p>
                   )}
-                  {scanResult.sources && scanResult.sources.length > 0 && (
+                  {scanResult.fromLibrary && scanResult.libraryLink ? (
+                    <div className="pt-1.5 border-t border-purple-100">
+                      <p className="text-gray-400 mb-1">Nguồn tham khảo:</p>
+                      <a href={scanResult.libraryLink} target="_blank" rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-blue-600 hover:underline">
+                        Bài viết tham khảo ↗
+                      </a>
+                    </div>
+                  ) : (!scanResult.fromLibrary && scanResult.sources && scanResult.sources.length > 0) && (
                     <div className="pt-1.5 border-t border-purple-100">
                       <p className="text-gray-400 mb-1">Nguồn tham khảo:</p>
                       <div className="flex flex-wrap gap-1.5">
                         {scanResult.sources.map((s) => (
-                          <a
-                            key={s.label}
-                            href={s.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-blue-600 hover:underline"
-                          >
+                          <a key={s.label} href={s.url} target="_blank" rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-blue-600 hover:underline">
                             {s.label} ↗
                           </a>
                         ))}

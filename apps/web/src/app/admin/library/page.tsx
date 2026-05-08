@@ -341,13 +341,12 @@ export default function LibraryPage() {
                             </span>
                           )}
                         </div>
-                        {result.libraryLink && (
+                        {result.fromLibrary && result.libraryLink ? (
                           <a href={result.libraryLink} target="_blank" rel="noopener noreferrer"
                             className="mt-1 block text-blue-600 hover:underline truncate">
                             Bài viết tham khảo ↗
                           </a>
-                        )}
-                        {result.sources && result.sources.length > 0 && (
+                        ) : (!result.fromLibrary && result.sources && result.sources.length > 0) && (
                           <div className="mt-1.5 flex flex-wrap gap-1">
                             {result.sources.map((s) => (
                               <a key={s.label} href={s.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{s.label} ↗</a>
