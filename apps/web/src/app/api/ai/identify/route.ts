@@ -162,16 +162,15 @@ Trả về JSON thuần (không markdown):
     ];
   }
 
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-  const message = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 1024,
-    messages: [{ role: 'user', content: messageContent }],
-  });
-
-  const raw = message.content[0].type === 'text' ? message.content[0].text.trim() : '{}';
-
   try {
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const message = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1024,
+      messages: [{ role: 'user', content: messageContent }],
+    });
+
+    const raw = message.content[0].type === 'text' ? message.content[0].text.trim() : '{}';
     const json = JSON.parse(raw.replace(/^```json\n?|```$/g, '').trim());
     if (json.fromLibrary && json.name) {
       const matched = libraryImages.find((l) => l.name === json.name);
@@ -184,6 +183,31 @@ Trả về JSON thuần (không markdown):
     }
     return NextResponse.json(json);
   } catch {
-    return NextResponse.json({ found: false, note: 'Không thể phân tích kết quả', raw });
+    // API failed (credits, network, etc.) — fall back to hash matching
+    if (libraryImages.length === 0) {
+      return NextResponse.json({ found: false, note: 'API không khả dụng và chưa có ảnh trong thư viện.' });
+    }
+    const inputHash = await computeAHash(base64);
+    const hashes = await Promise.all(libraryImages.map(lib => computeAHash(lib.b64)));
+    let bestIdx = 0;
+    let bestDist = hammingDistance(inputHash, hashes[0]);
+    for (let i = 1; i < hashes.length; i++) {
+      const d = hammingDistance(inputHash, hashes[i]);
+      if (d < bestDist) { bestDist = d; bestIdx = i; }
+    }
+    if (bestDist <= 12) {
+      const match = libraryImages[bestIdx];
+      return NextResponse.json({
+        found: true,
+        fromLibrary: true,
+        name: match.name,
+        scientificName: match.scientificName || '',
+        conservationStatus: match.conservationStatus || '',
+        description: match.description || '',
+        confidence: bestDist <= 5 ? 'high' : 'medium',
+        ...(match.link ? { libraryLink: match.link } : {}),
+      });
+    }
+    return NextResponse.json({ found: false, note: 'API không khả dụng. Không tìm thấy ảnh khớp trong thư viện.' });
   }
 }
