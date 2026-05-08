@@ -6,7 +6,7 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 type LibraryImage = { name: string; scientificName?: string; conservationStatus?: string; description?: string; link?: string; b64: string; mediaType: string };
 
-async function fetchLibraryImages(limit = 15): Promise<LibraryImage[]> {
+async function fetchLibraryImages(limit = 30): Promise<LibraryImage[]> {
   try {
     const index = await readSampleIndex();
     const namedEntries = Object.entries(index).filter(([, v]) => v.name);
@@ -46,25 +46,31 @@ export async function POST(req: NextRequest) {
   const base64 = Buffer.from(buffer).toString('base64');
   const mediaType = (file.type || 'image/jpeg') as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
 
-  // Fetch library images server-side for visual comparison
-  const libraryImages = await fetchLibraryImages(15);
+  const libraryImages = await fetchLibraryImages(30);
 
   let messageContent: Anthropic.ContentBlockParam[];
 
   if (libraryImages.length > 0) {
-    // Library-first: send library images + scan image in one call
+    // Group library images by species name, max 4 images per species, max 12 species
+    const speciesMap: Record<string, LibraryImage[]> = {};
+    for (const img of libraryImages) {
+      if (!speciesMap[img.name]) speciesMap[img.name] = [];
+      if (speciesMap[img.name].length < 4) speciesMap[img.name].push(img);
+    }
+    const speciesEntries = Object.entries(speciesMap).slice(0, 12);
+
     messageContent = [
-      { type: 'text', text: `Tôi có ${libraryImages.length} ảnh mẫu trong thư viện của mình:` },
-      ...libraryImages.flatMap<Anthropic.ContentBlockParam>((lib, i) => [
-        { type: 'text', text: `\nMẫu ${i + 1}: "${lib.name}"` },
-        { type: 'image', source: { type: 'base64', media_type: lib.mediaType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif', data: lib.b64 } },
+      { type: 'text', text: `Tôi có ${speciesEntries.length} loài trong thư viện mẫu:` },
+      ...speciesEntries.flatMap<Anthropic.ContentBlockParam>(([name, imgs], i) => [
+        { type: 'text', text: `\nLoài ${i + 1}: "${name}" (${imgs.length} góc chụp)` },
+        ...imgs.map(img => ({ type: 'image', source: { type: 'base64', media_type: img.mediaType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif', data: img.b64 } } as Anthropic.ContentBlockParam)),
       ]),
       { type: 'text', text: '\nĐây là ảnh cần nhận dạng:' },
       { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
       {
         type: 'text',
-        text: `Bước 1: So sánh ảnh cần nhận dạng với từng ảnh mẫu. Nếu ảnh cần nhận dạng là CÙNG LOÀI với một ảnh mẫu, đặt "fromLibrary": true và dùng tên của ảnh mẫu đó.
-Bước 2: Nếu không khớp với ảnh mẫu nào, nhận dạng bình thường từ kiến thức của bạn và đặt "fromLibrary": false.
+        text: `Bước 1: So sánh ảnh cần nhận dạng với từng loài trong thư viện. Mỗi loài có thể có nhiều góc chụp khác nhau để giúp nhận dạng chính xác hơn. Nếu ảnh cần nhận dạng là CÙNG LOÀI với một loài trong thư viện, đặt "fromLibrary": true và dùng đúng tên của loài đó.
+Bước 2: Nếu không khớp với loài nào, nhận dạng bình thường từ kiến thức của bạn và đặt "fromLibrary": false.
 
 Trả về JSON thuần (không markdown):
 {
@@ -85,7 +91,6 @@ Trả về JSON thuần (không markdown):
       },
     ];
   } else {
-    // No library — standard identification
     messageContent = [
       { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
       {
@@ -120,7 +125,6 @@ Trả về JSON thuần (không markdown):
 
   try {
     const json = JSON.parse(raw.replace(/^```json\n?|```$/g, '').trim());
-    // Override result with library metadata when matched
     if (json.fromLibrary && json.name) {
       const matched = libraryImages.find((l) => l.name === json.name);
       if (matched) {
