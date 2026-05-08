@@ -34,6 +34,11 @@ export async function POST(req: NextRequest) {
   "conservationStatus": "tình trạng theo IUCN (ví dụ: Nguy cấp (EN)) hoặc để trống nếu không biết",
   "description": "mô tả ngắn 2-3 câu bằng tiếng Việt về loài này",
   "confidence": "high/medium/low",
+  "sources": [
+    { "label": "IUCN Red List", "url": "https://www.iucnredlist.org/search?query=<tên khoa học>" },
+    { "label": "Wikipedia", "url": "https://en.wikipedia.org/wiki/<tên khoa học dấu cách thay bằng _>" },
+    { "label": "Wikipedia tiếng Việt", "url": "https://vi.wikipedia.org/wiki/<tên tiếng Việt dấu cách thay bằng _>" }
+  ],
   "note": "ghi chú nếu không nhận ra hoặc không phải động vật"
 }`,
           },

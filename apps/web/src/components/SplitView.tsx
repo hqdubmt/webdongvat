@@ -11,6 +11,7 @@ interface ScanResult {
   scientificName?: string;
   conservationStatus?: string;
   confidence?: string;
+  sources?: { label: string; url: string }[];
   note?: string;
   matchedSlug?: string;
 }
@@ -186,6 +187,24 @@ export default function SplitView({ species }: { species: Species[] }) {
                     </button>
                   ) : (
                     <p className="text-gray-400 italic">Chưa có trong hệ thống.</p>
+                  )}
+                  {scanResult.sources && scanResult.sources.length > 0 && (
+                    <div className="pt-1.5 border-t border-purple-100">
+                      <p className="text-gray-400 mb-1">Nguồn tham khảo:</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {scanResult.sources.map((s) => (
+                          <a
+                            key={s.label}
+                            href={s.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-blue-600 hover:underline"
+                          >
+                            {s.label} ↗
+                          </a>
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </div>
               ) : (
