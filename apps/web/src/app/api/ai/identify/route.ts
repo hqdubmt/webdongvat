@@ -36,13 +36,22 @@ async function fetchSpeciesDbImages(limit = 60): Promise<LibraryImage[]> {
   try {
     const apiBase = process.env.API_INTERNAL_URL || 'http://localhost:3001';
     const res = await fetch(`${apiBase}/api/species`, { cache: 'no-store' });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      console.error('[identify] fetchSpeciesDbImages: API status', res.status);
+      return [];
+    }
     const json = await res.json();
-    const speciesList: { slug: string; name: string; scientificName: string; description?: string | null; conservationStatus?: string | null; images: { objectKey: string; isPrimary: boolean }[] }[] = json.data ?? [];
+    const speciesList = (json.data ?? []) as Array<{
+      slug: string; name: string; scientificName: string;
+      description?: string | null; conservationStatus?: string | null;
+      images?: Array<{ objectKey: string; isPrimary: boolean }>;
+    }>;
+    console.log('[identify] fetchSpeciesDbImages: got', speciesList.length, 'species');
 
     const results = await Promise.all(
       speciesList.slice(0, limit).map(async (sp) => {
-        const primaryImg = sp.images.find((i) => i.isPrimary) ?? sp.images[0];
+        const imgs = sp.images ?? [];
+        const primaryImg = imgs.find((i) => i.isPrimary) ?? imgs[0];
         if (!primaryImg?.objectKey) return null;
         try {
           const stream = await getClient().getObject(BUCKET, primaryImg.objectKey);
@@ -52,13 +61,17 @@ async function fetchSpeciesDbImages(limit = 60): Promise<LibraryImage[]> {
           const ext = primaryImg.objectKey.split('.').pop()?.toLowerCase() || 'jpg';
           const mediaType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
           return { name: sp.name, scientificName: sp.scientificName, conservationStatus: sp.conservationStatus || undefined, description: sp.description || undefined, slug: sp.slug, b64, mediaType };
-        } catch {
+        } catch (e) {
+          console.error('[identify] fetchSpeciesDbImages: failed image for', sp.slug, (e as Error)?.message);
           return null;
         }
       })
     );
-    return results.filter(Boolean) as LibraryImage[];
-  } catch {
+    const loaded = results.filter(Boolean) as LibraryImage[];
+    console.log('[identify] fetchSpeciesDbImages: loaded', loaded.length, 'images');
+    return loaded;
+  } catch (e) {
+    console.error('[identify] fetchSpeciesDbImages: fatal', (e as Error)?.message);
     return [];
   }
 }
