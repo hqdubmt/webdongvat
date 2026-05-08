@@ -187,6 +187,8 @@ export default function SplitView({ species }: { species: Species[] }) {
                       </svg>
                       Xem loài này trong hệ thống
                     </button>
+                  ) : scanResult.fromLibrary ? (
+                    <p className="text-blue-600 font-medium text-xs">Đã có trong thư viện của bạn.</p>
                   ) : (
                     <p className="text-gray-400 italic">Chưa có trong hệ thống.</p>
                   )}
