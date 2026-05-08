@@ -5,6 +5,16 @@ import { useRouter } from 'next/navigation';
 import { createSpecies, uploadImage, revalidateCache } from '@/lib/api';
 import ConservationInput from '@/components/ConservationInput';
 
+interface IdentifyResult {
+  found: boolean;
+  name?: string;
+  scientificName?: string;
+  conservationStatus?: string;
+  description?: string;
+  confidence?: string;
+  note?: string;
+}
+
 function toSlug(str: string) {
   return str
     .toLowerCase()
@@ -25,6 +35,9 @@ export default function NewSpeciesPage() {
   const [slugManual, setSlugManual] = useState(false);
   const [created, setCreated] = useState<{ slug: string; name: string } | null>(null);
   const [slugStatus, setSlugStatus] = useState<'idle' | 'checking' | 'taken' | 'free'>('idle');
+  const [identifying, setIdentifying] = useState(false);
+  const [identified, setIdentified] = useState<IdentifyResult | null>(null);
+  const scanRef = useRef<HTMLInputElement>(null);
 
   const [form, setForm] = useState({
     name: '',
@@ -86,6 +99,38 @@ export default function NewSpeciesPage() {
     setImagePreview(null);
     setImageCaption('');
     if (fileRef.current) fileRef.current.value = '';
+  }
+
+  async function handleScanImage(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIdentifying(true);
+    setIdentified(null);
+    const fd = new FormData();
+    fd.append('image', file);
+    try {
+      const res = await fetch('/api/ai/identify', { method: 'POST', body: fd });
+      const data: IdentifyResult = await res.json();
+      setIdentified(data);
+    } catch {
+      setIdentified({ found: false, note: 'Lỗi kết nối, thử lại.' });
+    } finally {
+      setIdentifying(false);
+      if (scanRef.current) scanRef.current.value = '';
+    }
+  }
+
+  function applyIdentified() {
+    if (!identified) return;
+    setForm((p) => ({
+      ...p,
+      name: identified.name || p.name,
+      scientificName: identified.scientificName || p.scientificName,
+      conservationStatus: identified.conservationStatus || p.conservationStatus,
+      description: identified.description || p.description,
+      slug: !slugManual && identified.name ? toSlug(identified.name) : p.slug,
+    }));
+    setIdentified(null);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -174,6 +219,46 @@ export default function NewSpeciesPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Thêm loài mới</h1>
         <p className="text-gray-500 text-sm mt-1">Điền thông tin và đính kèm ảnh đại diện (tùy chọn).</p>
+      </div>
+
+      {/* AI Scan */}
+      <div className="mb-4 bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-gray-800">Nhận dạng loài từ ảnh</p>
+            <p className="text-xs text-gray-400 mt-0.5">Chụp hoặc chọn ảnh động vật — AI tự điền thông tin</p>
+          </div>
+          <label className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors ${identifying ? 'bg-gray-100 text-gray-400' : 'bg-purple-600 hover:bg-purple-700 text-white'}`}>
+            {identifying ? (
+              <><svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> Đang nhận dạng...</>
+            ) : (
+              <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/></svg> Quét ảnh</>
+            )}
+            <input ref={scanRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleScanImage} disabled={identifying} />
+          </label>
+        </div>
+
+        {identified && (
+          <div className={`mt-3 p-3 rounded-lg border text-sm ${identified.found ? 'bg-purple-50 border-purple-200' : 'bg-gray-50 border-gray-200'}`}>
+            {identified.found ? (
+              <>
+                <div className="space-y-1 mb-3">
+                  {identified.name && <p><span className="text-gray-500">Tên:</span> <strong>{identified.name}</strong></p>}
+                  {identified.scientificName && <p><span className="text-gray-500">Tên KH:</span> <em>{identified.scientificName}</em></p>}
+                  {identified.conservationStatus && <p><span className="text-gray-500">Tình trạng:</span> {identified.conservationStatus}</p>}
+                  {identified.description && <p className="text-gray-600 text-xs mt-1">{identified.description}</p>}
+                  {identified.confidence && <p className="text-xs text-gray-400 mt-1">Độ tin cậy: <span className={identified.confidence === 'high' ? 'text-green-600' : identified.confidence === 'medium' ? 'text-yellow-600' : 'text-red-500'}>{identified.confidence === 'high' ? 'Cao' : identified.confidence === 'medium' ? 'Trung bình' : 'Thấp'}</span></p>}
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" onClick={applyIdentified} className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-md text-xs font-medium">Điền vào form</button>
+                  <button type="button" onClick={() => setIdentified(null)} className="text-gray-400 hover:text-gray-600 text-xs px-2">Bỏ qua</button>
+                </div>
+              </>
+            ) : (
+              <p className="text-gray-500">{identified.note || 'Không nhận ra loài trong ảnh này.'}</p>
+            )}
+          </div>
+        )}
       </div>
 
       {error && (
