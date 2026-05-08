@@ -4,7 +4,7 @@ import { getClient, BUCKET, readSampleIndex } from '@/lib/minio';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-type LibraryImage = { name: string; link?: string; b64: string; mediaType: string };
+type LibraryImage = { name: string; scientificName?: string; conservationStatus?: string; description?: string; link?: string; b64: string; mediaType: string };
 
 async function fetchLibraryImages(limit = 15): Promise<LibraryImage[]> {
   try {
@@ -21,7 +21,7 @@ async function fetchLibraryImages(limit = 15): Promise<LibraryImage[]> {
           const b64 = Buffer.concat(chunks).toString('base64');
           const ext = key.split('.').pop()?.toLowerCase() || 'jpg';
           const mediaType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
-          return { name: entry.name, link: entry.link, b64, mediaType };
+          return { name: entry.name, scientificName: entry.scientificName, conservationStatus: entry.conservationStatus, description: entry.description, link: entry.link, b64, mediaType };
         } catch {
           return null;
         }
@@ -120,10 +120,15 @@ Trả về JSON thuần (không markdown):
 
   try {
     const json = JSON.parse(raw.replace(/^```json\n?|```$/g, '').trim());
-    // Attach library link to result if matched
+    // Override result with library metadata when matched
     if (json.fromLibrary && json.name) {
       const matched = libraryImages.find((l) => l.name === json.name);
-      if (matched?.link) json.libraryLink = matched.link;
+      if (matched) {
+        if (matched.link) json.libraryLink = matched.link;
+        if (matched.scientificName) json.scientificName = matched.scientificName;
+        if (matched.conservationStatus) json.conservationStatus = matched.conservationStatus;
+        if (matched.description) json.description = matched.description;
+      }
     }
     return NextResponse.json(json);
   } catch {

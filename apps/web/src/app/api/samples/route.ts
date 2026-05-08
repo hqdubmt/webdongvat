@@ -24,7 +24,14 @@ export async function GET() {
     const index = await readSampleIndex();
     const data = objects.map((o) => {
       const entry = index[o.key];
-      return { ...o, name: entry?.name || '', link: entry?.link || '' };
+      return {
+        ...o,
+        name: entry?.name || '',
+        scientificName: entry?.scientificName || '',
+        conservationStatus: entry?.conservationStatus || '',
+        description: entry?.description || '',
+        link: entry?.link || '',
+      };
     });
 
     return NextResponse.json({ data });
@@ -41,8 +48,15 @@ export async function POST(req: NextRequest) {
     const files = formData.getAll('images') as File[];
     const namesRaw = formData.get('names') as string | null;
     const linksRaw = formData.get('links') as string | null;
+    const scientificNamesRaw = formData.get('scientificNames') as string | null;
+    const conservationStatusesRaw = formData.get('conservationStatuses') as string | null;
+    const descriptionsRaw = formData.get('descriptions') as string | null;
+
     const names: string[] = namesRaw ? JSON.parse(namesRaw) : [];
     const links: string[] = linksRaw ? JSON.parse(linksRaw) : [];
+    const scientificNames: string[] = scientificNamesRaw ? JSON.parse(scientificNamesRaw) : [];
+    const conservationStatuses: string[] = conservationStatusesRaw ? JSON.parse(conservationStatusesRaw) : [];
+    const descriptions: string[] = descriptionsRaw ? JSON.parse(descriptionsRaw) : [];
 
     if (files.length === 0) return NextResponse.json({ error: 'No images provided' }, { status: 400 });
 
@@ -55,9 +69,15 @@ export async function POST(req: NextRequest) {
         const buffer = Buffer.from(await file.arrayBuffer());
         await client.putObject(BUCKET, objectKey, buffer, buffer.length, { 'Content-Type': file.type || 'image/jpeg' });
         const name = names[i] || path.basename(file.name, ext);
-        const link = links[i] || '';
-        index[objectKey] = { name, link };
-        return { key: objectKey, url: publicUrl(objectKey), name, link };
+        const entry = {
+          name,
+          scientificName: scientificNames[i] || '',
+          conservationStatus: conservationStatuses[i] || '',
+          description: descriptions[i] || '',
+          link: links[i] || '',
+        };
+        index[objectKey] = entry;
+        return { key: objectKey, url: publicUrl(objectKey), ...entry };
       })
     );
 

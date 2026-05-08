@@ -26,7 +26,7 @@ export function publicUrl(objectKey: string): string {
 
 const INDEX_KEY = 'samples/_index.json';
 
-export type SampleEntry = { name: string; link?: string };
+export type SampleEntry = { name: string; scientificName?: string; conservationStatus?: string; description?: string; link?: string };
 export type SampleIndex = Record<string, SampleEntry>;
 
 export async function readSampleIndex(): Promise<SampleIndex> {

@@ -8,12 +8,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ke
     if (!objectKey.startsWith('samples/')) {
       return NextResponse.json({ error: 'Invalid key' }, { status: 400 });
     }
-    const { name, link } = await req.json();
+    const body = await req.json();
     const index = await readSampleIndex();
     const current = index[objectKey] ?? { name: '' };
     index[objectKey] = {
-      name: name !== undefined ? (name ?? '') : current.name,
-      link: link !== undefined ? (link ?? '') : current.link,
+      name: body.name !== undefined ? (body.name ?? '') : current.name,
+      scientificName: body.scientificName !== undefined ? (body.scientificName ?? '') : current.scientificName,
+      conservationStatus: body.conservationStatus !== undefined ? (body.conservationStatus ?? '') : current.conservationStatus,
+      description: body.description !== undefined ? (body.description ?? '') : current.description,
+      link: body.link !== undefined ? (body.link ?? '') : current.link,
     };
     await writeSampleIndex(index);
     return NextResponse.json({ success: true });
