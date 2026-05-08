@@ -54,6 +54,42 @@ export default function EditSpeciesPage() {
   // AI description
   const [generatingDesc, setGeneratingDesc] = useState(false);
 
+  // AI scan identify
+  const scanRef = useRef<HTMLInputElement>(null);
+  const [identifying, setIdentifying] = useState(false);
+  const [identified, setIdentified] = useState<{ found: boolean; fromLibrary?: boolean; libraryLink?: string; name?: string; scientificName?: string; conservationStatus?: string; description?: string; confidence?: string; note?: string } | null>(null);
+
+  async function handleScanImage(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIdentifying(true);
+    setIdentified(null);
+    const fd = new FormData();
+    fd.append('image', file);
+    try {
+      const res = await fetch('/api/ai/identify', { method: 'POST', body: fd });
+      const data = await res.json();
+      setIdentified(data);
+    } catch {
+      setIdentified({ found: false, note: 'Lỗi kết nối, thử lại.' });
+    } finally {
+      setIdentifying(false);
+      if (scanRef.current) scanRef.current.value = '';
+    }
+  }
+
+  function applyIdentified() {
+    if (!identified) return;
+    setForm((p) => ({
+      ...p,
+      name: identified.name || p.name,
+      scientificName: identified.scientificName || p.scientificName,
+      conservationStatus: identified.conservationStatus || p.conservationStatus,
+      description: identified.description || p.description,
+    }));
+    setIdentified(null);
+  }
+
   // Videos
   const [videoTab, setVideoTab] = useState<'url' | 'file'>('url');
   const [videoForm, setVideoForm] = useState({ url: '', title: '' });
@@ -267,7 +303,41 @@ export default function EditSpeciesPage() {
 
       {/* ── Thông tin cơ bản ── */}
       <section className="bg-white rounded-xl border border-gray-200 p-6">
-        <h2 className="text-base font-semibold text-gray-800 mb-4">Thông tin cơ bản</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-semibold text-gray-800">Thông tin cơ bản</h2>
+          <label className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-colors ${identifying ? 'bg-gray-100 text-gray-400' : 'bg-purple-600 hover:bg-purple-700 text-white'}`}>
+            {identifying
+              ? <><svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Đang nhận dạng...</>
+              : <><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/></svg>Quét ảnh AI</>}
+            <input ref={scanRef} type="file" accept="image/*" className="hidden" onChange={handleScanImage} disabled={identifying} />
+          </label>
+        </div>
+
+        {identified && (
+          <div className={`mb-4 p-3 rounded-lg border text-sm ${identified.found ? 'bg-purple-50 border-purple-200' : 'bg-gray-50 border-gray-200'}`}>
+            {identified.found ? (
+              <>
+                <div className="space-y-0.5 mb-2">
+                  {identified.name && <p><span className="text-gray-500 text-xs">Tên:</span> <strong>{identified.name}</strong></p>}
+                  {identified.scientificName && <p><span className="text-gray-500 text-xs">Tên KH:</span> <em>{identified.scientificName}</em></p>}
+                  {identified.conservationStatus && <p><span className="text-gray-500 text-xs">Tình trạng:</span> {identified.conservationStatus}</p>}
+                  {identified.description && <p className="text-gray-600 text-xs mt-1">{identified.description}</p>}
+                  {identified.fromLibrary && <p className="text-xs font-medium text-blue-700 mt-1">Từ thư viện của bạn</p>}
+                  {identified.libraryLink && <a href={identified.libraryLink} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">Bài viết tham khảo ↗</a>}
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" onClick={applyIdentified} className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-md text-xs font-medium">Áp dụng vào form</button>
+                  <button type="button" onClick={() => setIdentified(null)} className="text-gray-400 hover:text-gray-600 text-xs px-2">Bỏ qua</button>
+                </div>
+              </>
+            ) : (
+              <div className="flex items-center justify-between">
+                <p className="text-gray-500">{identified.note || 'Không nhận ra loài trong ảnh này.'}</p>
+                <button type="button" onClick={() => setIdentified(null)} className="text-gray-400 hover:text-gray-500 text-xs ml-3">✕</button>
+              </div>
+            )}
+          </div>
+        )}
 
         {saveError && <p className="mb-3 text-sm text-red-600">{saveError}</p>}
         {saveMsg && <p className="mb-3 text-sm text-green-600 font-medium">{saveMsg}</p>}
