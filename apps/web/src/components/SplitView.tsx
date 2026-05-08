@@ -12,6 +12,7 @@ interface ScanResult {
   name?: string;
   scientificName?: string;
   conservationStatus?: string;
+  description?: string;
   confidence?: string;
   sources?: { label: string; url: string }[];
   note?: string;
@@ -167,6 +168,7 @@ export default function SplitView({ species }: { species: Species[] }) {
                       {scanResult.name && <p className="font-semibold text-gray-900">{scanResult.name}</p>}
                       {scanResult.scientificName && <p className="italic text-gray-500">{scanResult.scientificName}</p>}
                       {scanResult.conservationStatus && <p className="text-gray-600 mt-0.5">{scanResult.conservationStatus}</p>}
+                      {scanResult.description && <p className="text-gray-500 mt-1 leading-relaxed">{scanResult.description}</p>}
                       {scanResult.confidence && (
                         <p className="text-gray-400 mt-0.5">
                           Độ tin cậy: <span className={scanResult.confidence === 'high' ? 'text-green-600 font-medium' : scanResult.confidence === 'medium' ? 'text-yellow-600 font-medium' : 'text-red-500 font-medium'}>
