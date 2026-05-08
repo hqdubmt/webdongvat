@@ -1,10 +1,21 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { adminFetchSpeciesList, deleteSpecies, revalidateCache, type Species } from '@/lib/api';
 import { getConservationStatusColor } from '@/lib/utils';
 import StatsMapWrapper from '@/components/StatsMapWrapper';
+
+interface ScanResult {
+  found: boolean;
+  name?: string;
+  scientificName?: string;
+  conservationStatus?: string;
+  description?: string;
+  confidence?: string;
+  matchedSlug?: string;
+  note?: string;
+}
 
 const STATUS_GROUPS = [
   { key: 'CR', label: 'Cực kỳ nguy cấp', match: 'cr' },
@@ -30,6 +41,9 @@ export default function AdminDashboard() {
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [userRole, setUserRole] = useState<string>('ADMIN');
+  const [scanning, setScanning] = useState(false);
+  const [scanResult, setScanResult] = useState<ScanResult | null>(null);
+  const scanInputRef = useRef<HTMLInputElement>(null);
   const canDelete = userRole !== 'EDITOR';
 
   function load() {
@@ -85,6 +99,37 @@ export default function AdminDashboard() {
       return matchSearch && matchStatus;
     });
   }, [list, search, filterStatus]);
+
+  async function handleScan(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setScanning(true);
+    setScanResult(null);
+    const fd = new FormData();
+    fd.append('image', file);
+    if (scanInputRef.current) scanInputRef.current.value = '';
+    try {
+      const res = await fetch('/api/ai/identify', { method: 'POST', body: fd });
+      const data = await res.json();
+      let matchedSlug: string | undefined = data.matchedSlug;
+      if (!matchedSlug && data.found && (data.scientificName || data.name)) {
+        const sciLower = data.scientificName?.toLowerCase() ?? '';
+        const nameLower = data.name?.toLowerCase() ?? '';
+        const match = list.find(
+          (s) =>
+            (sciLower && s.scientificName.toLowerCase().includes(sciLower)) ||
+            (sciLower && sciLower.includes(s.scientificName.toLowerCase())) ||
+            (nameLower && s.name.toLowerCase().includes(nameLower))
+        );
+        matchedSlug = match?.slug;
+      }
+      setScanResult({ ...data, matchedSlug });
+    } catch {
+      setScanResult({ found: false, note: 'Lỗi kết nối. Thử lại.' });
+    } finally {
+      setScanning(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -148,17 +193,33 @@ export default function AdminDashboard() {
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Tìm kiếm tên loài, tên khoa học, slug..."
-            className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-          />
+        <div className="relative flex-1 flex gap-2">
+          <div className="relative flex-1">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Tìm kiếm tên loài, tên khoa học, slug..."
+              className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+            />
+          </div>
+          <label className={`flex items-center justify-center w-10 h-10 rounded-lg border cursor-pointer transition-colors shrink-0 ${scanning ? 'bg-purple-50 border-purple-200' : 'border-gray-300 hover:bg-purple-50 hover:border-purple-400'}`} title="Nhận dạng loài từ ảnh">
+            {scanning ? (
+              <svg className="animate-spin w-4 h-4 text-purple-500" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+              </svg>
+            ) : (
+              <svg className="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/>
+              </svg>
+            )}
+            <input ref={scanInputRef} type="file" accept="image/*" className="hidden" onChange={handleScan} disabled={scanning} />
+          </label>
         </div>
         <select
           value={filterStatus}
@@ -180,6 +241,39 @@ export default function AdminDashboard() {
           </button>
         )}
       </div>
+
+      {/* Scan result */}
+      {scanResult && (
+        <div className={`rounded-xl border p-4 text-sm ${scanResult.found ? 'bg-purple-50 border-purple-200' : 'bg-gray-50 border-gray-200'}`}>
+          {scanResult.found ? (
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-1">
+                {scanResult.name && <p className="font-semibold text-gray-900">{scanResult.name}</p>}
+                {scanResult.scientificName && <p className="italic text-gray-500 text-xs">{scanResult.scientificName}</p>}
+                {scanResult.conservationStatus && <p className="text-orange-600 text-xs">{scanResult.conservationStatus}</p>}
+                {scanResult.description && <p className="text-gray-600 text-xs mt-1 leading-relaxed">{scanResult.description}</p>}
+                {scanResult.confidence && (
+                  <p className="text-gray-400 text-xs">Độ tin cậy: <span className={scanResult.confidence === 'high' ? 'text-green-600 font-medium' : scanResult.confidence === 'medium' ? 'text-yellow-600 font-medium' : 'text-red-500 font-medium'}>{scanResult.confidence === 'high' ? 'Cao' : scanResult.confidence === 'medium' ? 'Trung bình' : 'Thấp'}</span></p>
+                )}
+                {scanResult.matchedSlug ? (
+                  <Link href={`/admin/species/${scanResult.matchedSlug}/edit`} className="inline-flex items-center gap-1.5 mt-2 bg-purple-600 hover:bg-purple-700 text-white text-xs px-3 py-1.5 rounded-lg font-medium">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                    Chỉnh sửa loài này
+                  </Link>
+                ) : (
+                  <p className="text-gray-400 italic text-xs mt-1">Chưa có trong hệ thống — <Link href="/admin/species/new" className="text-green-600 hover:underline">Thêm mới</Link></p>
+                )}
+              </div>
+              <button onClick={() => setScanResult(null)} className="text-gray-300 hover:text-gray-500 shrink-0 text-lg leading-none">✕</button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-gray-500">{scanResult.note || 'Không nhận ra loài trong ảnh.'}</p>
+              <button onClick={() => setScanResult(null)} className="text-gray-300 hover:text-gray-500 shrink-0">✕</button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Table */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
