@@ -35,7 +35,7 @@ async function fetchLibraryImages(limit = 30): Promise<LibraryImage[]> {
 }
 
 // Average hash (8x8 = 64 bits) — fast pixel-based similarity
-async function computeAHash(b64: string): Promise<bigint> {
+async function computeAHash(b64: string): Promise<boolean[]> {
   const { data } = await sharp(Buffer.from(b64, 'base64'))
     .resize(8, 8, { fit: 'fill' })
     .grayscale()
@@ -43,17 +43,12 @@ async function computeAHash(b64: string): Promise<bigint> {
     .toBuffer({ resolveWithObject: true });
   const pixels = Array.from(data as Uint8Array);
   const avg = pixels.reduce((a, b) => a + b, 0) / pixels.length;
-  let hash = 0n;
-  for (let i = 0; i < 64; i++) {
-    if (pixels[i] >= avg) hash |= (1n << BigInt(i));
-  }
-  return hash;
+  return pixels.map(p => p >= avg);
 }
 
-function hammingDistance(a: bigint, b: bigint): number {
-  let x = a ^ b;
+function hammingDistance(a: boolean[], b: boolean[]): number {
   let dist = 0;
-  while (x > 0n) { if (x & 1n) dist++; x >>= 1n; }
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) dist++;
   return dist;
 }
 
