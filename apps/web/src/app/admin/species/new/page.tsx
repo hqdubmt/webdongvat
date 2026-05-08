@@ -105,13 +105,27 @@ export default function NewSpeciesPage() {
     return () => clearTimeout(timer);
   }, [form.slug]);
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0] ?? null;
     setImageFile(file);
     if (file) {
       const reader = new FileReader();
       reader.onload = (ev) => setImagePreview(ev.target?.result as string);
       reader.readAsDataURL(file);
+      // Auto-identify when image is selected
+      setIdentifying(true);
+      setIdentified(null);
+      const fd = new FormData();
+      fd.append('image', file);
+      try {
+        const res = await fetch('/api/ai/identify', { method: 'POST', body: fd });
+        const data: IdentifyResult = await res.json();
+        setIdentified(data);
+      } catch {
+        setIdentified({ found: false, note: 'Lỗi nhận dạng, thử lại.' });
+      } finally {
+        setIdentifying(false);
+      }
     } else {
       setImagePreview(null);
     }
@@ -425,6 +439,12 @@ export default function NewSpeciesPage() {
               <div className="relative w-full h-48 rounded-lg overflow-hidden border border-gray-200 bg-gray-100">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={imagePreview} alt="preview" className="w-full h-full object-cover" />
+                {identifying && (
+                  <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center gap-2">
+                    <svg className="animate-spin w-6 h-6 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                    <p className="text-white text-xs font-medium">Đang nhận dạng...</p>
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={removeImage}
