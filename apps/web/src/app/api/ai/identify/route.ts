@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { NextRequest, NextResponse } from 'next/server';
 import { getClient, BUCKET, readSampleIndex } from '@/lib/minio';
+import sharp from 'sharp';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -33,11 +34,30 @@ async function fetchLibraryImages(limit = 30): Promise<LibraryImage[]> {
   }
 }
 
-export async function POST(req: NextRequest) {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return NextResponse.json({ error: 'ANTHROPIC_API_KEY chưa được cấu hình' }, { status: 503 });
+// Average hash (8x8 = 64 bits) — fast pixel-based similarity
+async function computeAHash(b64: string): Promise<bigint> {
+  const { data } = await sharp(Buffer.from(b64, 'base64'))
+    .resize(8, 8, { fit: 'fill' })
+    .grayscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const pixels = Array.from(data as Uint8Array);
+  const avg = pixels.reduce((a, b) => a + b, 0) / pixels.length;
+  let hash = 0n;
+  for (let i = 0; i < 64; i++) {
+    if (pixels[i] >= avg) hash |= (1n << BigInt(i));
   }
+  return hash;
+}
 
+function hammingDistance(a: bigint, b: bigint): number {
+  let x = a ^ b;
+  let dist = 0;
+  while (x > 0n) { if (x & 1n) dist++; x >>= 1n; }
+  return dist;
+}
+
+export async function POST(req: NextRequest) {
   const formData = await req.formData();
   const file = formData.get('image') as File | null;
   if (!file) return NextResponse.json({ error: 'Thiếu ảnh' }, { status: 400 });
@@ -48,10 +68,44 @@ export async function POST(req: NextRequest) {
 
   const libraryImages = await fetchLibraryImages(30);
 
+  // No API key — fallback to hash-based library matching
+  if (!process.env.ANTHROPIC_API_KEY) {
+    if (libraryImages.length === 0) {
+      return NextResponse.json({ found: false, note: 'Không có ảnh trong thư viện và chưa cấu hình ANTHROPIC_API_KEY.' });
+    }
+
+    const inputHash = await computeAHash(base64);
+    const hashes = await Promise.all(libraryImages.map(lib => computeAHash(lib.b64)));
+
+    let bestIdx = 0;
+    let bestDist = hammingDistance(inputHash, hashes[0]);
+    for (let i = 1; i < hashes.length; i++) {
+      const d = hammingDistance(inputHash, hashes[i]);
+      if (d < bestDist) { bestDist = d; bestIdx = i; }
+    }
+
+    const THRESHOLD = 12;
+    if (bestDist <= THRESHOLD) {
+      const match = libraryImages[bestIdx];
+      return NextResponse.json({
+        found: true,
+        fromLibrary: true,
+        name: match.name,
+        scientificName: match.scientificName || '',
+        conservationStatus: match.conservationStatus || '',
+        description: match.description || '',
+        confidence: bestDist <= 5 ? 'high' : 'medium',
+        ...(match.link ? { libraryLink: match.link } : {}),
+      });
+    }
+
+    return NextResponse.json({ found: false, note: 'Không tìm thấy ảnh khớp trong thư viện. Thêm ANTHROPIC_API_KEY để nhận dạng ảnh mới.' });
+  }
+
   let messageContent: Anthropic.ContentBlockParam[];
 
   if (libraryImages.length > 0) {
-    // Group library images by species name, max 4 images per species, max 12 species
+    // Group library images by species name
     const speciesMap: Record<string, LibraryImage[]> = {};
     for (const img of libraryImages) {
       if (!speciesMap[img.name]) speciesMap[img.name] = [];
