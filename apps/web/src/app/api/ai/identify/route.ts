@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
     const speciesMap: Record<string, LibraryImage[]> = {};
     for (const img of libraryImages) {
       if (!speciesMap[img.name]) speciesMap[img.name] = [];
-      if (speciesMap[img.name].length < 4) speciesMap[img.name].push(img);
+      speciesMap[img.name].push(img);
     }
     const speciesEntries = Object.entries(speciesMap).slice(0, 12);
 
