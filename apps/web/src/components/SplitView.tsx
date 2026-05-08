@@ -1,9 +1,19 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import type { Species } from '@/lib/api';
 import { getConservationStatusColor } from '@/lib/utils';
 import SpeciesDetailPanel from './SpeciesDetailPanel';
+
+interface ScanResult {
+  found: boolean;
+  name?: string;
+  scientificName?: string;
+  conservationStatus?: string;
+  confidence?: string;
+  note?: string;
+  matchedSlug?: string;
+}
 
 const PAGE_SIZE = 10;
 
@@ -27,6 +37,9 @@ export default function SplitView({ species }: { species: Species[] }) {
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [showDetail, setShowDetail] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [scanResult, setScanResult] = useState<ScanResult | null>(null);
+  const scanInputRef = useRef<HTMLInputElement>(null);
 
   const filtered = useMemo(() => {
     let result = species;
@@ -63,6 +76,44 @@ export default function SplitView({ species }: { species: Species[] }) {
     setPage(1);
   }
 
+  async function handleScan(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setScanning(true);
+    setScanResult(null);
+    const fd = new FormData();
+    fd.append('image', file);
+    if (scanInputRef.current) scanInputRef.current.value = '';
+    try {
+      const res = await fetch('/api/ai/identify', { method: 'POST', body: fd });
+      const data = await res.json();
+      // Try to match against local species list
+      let matchedSlug: string | undefined;
+      if (data.found && (data.scientificName || data.name)) {
+        const sciLower = data.scientificName?.toLowerCase() ?? '';
+        const nameLower = data.name?.toLowerCase() ?? '';
+        const match = species.find(
+          (s) =>
+            (sciLower && s.scientificName.toLowerCase().includes(sciLower)) ||
+            (sciLower && sciLower.includes(s.scientificName.toLowerCase())) ||
+            (nameLower && s.name.toLowerCase().includes(nameLower))
+        );
+        matchedSlug = match?.slug;
+      }
+      setScanResult({ ...data, matchedSlug });
+    } catch {
+      setScanResult({ found: false, note: 'Lỗi kết nối. Thử lại.' });
+    } finally {
+      setScanning(false);
+    }
+  }
+
+  function openMatchedSpecies(slug: string) {
+    setSelectedSlug(slug);
+    setShowDetail(true);
+    setScanResult(null);
+  }
+
   return (
     <div className="flex h-[calc(100vh-64px)]">
       {/* ── Left panel ── */}
@@ -73,18 +124,79 @@ export default function SplitView({ species }: { species: Species[] }) {
       >
         {/* Search + filter */}
         <div className="p-3 border-b border-gray-100 space-y-2 shrink-0">
-          <div className="relative">
-            <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => handleSearch(e.target.value)}
-              placeholder="Tìm kiếm loài..."
-              className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-400"
-            />
+          <div className="relative flex gap-1.5">
+            <div className="relative flex-1">
+              <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => handleSearch(e.target.value)}
+                placeholder="Tìm kiếm loài..."
+                className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-400"
+              />
+            </div>
+            {/* Camera scan button */}
+            <label className={`flex items-center justify-center w-8 h-8 rounded-lg border cursor-pointer transition-colors shrink-0 ${scanning ? 'bg-purple-50 border-purple-200' : 'border-gray-200 hover:bg-purple-50 hover:border-purple-300'}`} title="Nhận dạng loài từ ảnh">
+              {scanning ? (
+                <svg className="animate-spin w-4 h-4 text-purple-500" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                </svg>
+              ) : (
+                <svg className="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/>
+                </svg>
+              )}
+              <input ref={scanInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleScan} disabled={scanning} />
+            </label>
           </div>
+
+          {/* Scan result */}
+          {scanResult && (
+            <div className={`rounded-lg border p-2.5 text-xs ${scanResult.found ? 'bg-purple-50 border-purple-200' : 'bg-gray-50 border-gray-200'}`}>
+              {scanResult.found ? (
+                <div className="space-y-1.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      {scanResult.name && <p className="font-semibold text-gray-900">{scanResult.name}</p>}
+                      {scanResult.scientificName && <p className="italic text-gray-500">{scanResult.scientificName}</p>}
+                      {scanResult.conservationStatus && <p className="text-gray-600 mt-0.5">{scanResult.conservationStatus}</p>}
+                      {scanResult.confidence && (
+                        <p className="text-gray-400 mt-0.5">
+                          Độ tin cậy: <span className={scanResult.confidence === 'high' ? 'text-green-600 font-medium' : scanResult.confidence === 'medium' ? 'text-yellow-600 font-medium' : 'text-red-500 font-medium'}>
+                            {scanResult.confidence === 'high' ? 'Cao' : scanResult.confidence === 'medium' ? 'Trung bình' : 'Thấp'}
+                          </span>
+                        </p>
+                      )}
+                    </div>
+                    <button onClick={() => setScanResult(null)} className="text-gray-300 hover:text-gray-500 shrink-0">✕</button>
+                  </div>
+                  {scanResult.matchedSlug ? (
+                    <button
+                      onClick={() => openMatchedSpecies(scanResult.matchedSlug!)}
+                      className="w-full flex items-center justify-center gap-1.5 bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-md font-medium"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6"/>
+                      </svg>
+                      Xem loài này trong hệ thống
+                    </button>
+                  ) : (
+                    <p className="text-gray-400 italic">Chưa có trong hệ thống.</p>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-gray-500">{scanResult.note || 'Không nhận ra loài trong ảnh.'}</p>
+                  <button onClick={() => setScanResult(null)} className="text-gray-300 hover:text-gray-500 shrink-0">✕</button>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="flex gap-1 flex-wrap">
             {STATUS_FILTERS.map((f) => (
               <button
