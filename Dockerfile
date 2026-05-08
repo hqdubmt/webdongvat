@@ -28,7 +28,7 @@ RUN npm run build
 
 # ─── Stage 4: Final combined image ─────────────────────────────────────────
 FROM node:20-alpine AS runner
-RUN apk add --no-cache curl
+RUN apk add --no-cache curl openssl
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
