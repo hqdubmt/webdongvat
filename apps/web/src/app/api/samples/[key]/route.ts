@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getClient, BUCKET } from '@/lib/minio';
+import { getClient, BUCKET, readSampleIndex, writeSampleIndex } from '@/lib/minio';
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ key: string }> }) {
   try {
@@ -9,9 +9,13 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: 'Invalid key' }, { status: 400 });
     }
     await getClient().removeObject(BUCKET, objectKey);
+
+    const index = await readSampleIndex();
+    delete index[objectKey];
+    await writeSampleIndex(index);
+
     return NextResponse.json({ success: true });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Unknown error';
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json({ error: err instanceof Error ? err.message : 'Unknown error' }, { status: 500 });
   }
 }

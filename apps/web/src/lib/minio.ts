@@ -24,6 +24,24 @@ export function publicUrl(objectKey: string): string {
   return `${base}/${BUCKET}/${objectKey}`;
 }
 
+const INDEX_KEY = 'samples/_index.json';
+
+export async function readSampleIndex(): Promise<Record<string, string>> {
+  try {
+    const stream = await getClient().getObject(BUCKET, INDEX_KEY);
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } catch {
+    return {};
+  }
+}
+
+export async function writeSampleIndex(index: Record<string, string>): Promise<void> {
+  const buf = Buffer.from(JSON.stringify(index, null, 2));
+  await getClient().putObject(BUCKET, INDEX_KEY, buf, buf.length, { 'Content-Type': 'application/json' });
+}
+
 export async function ensureBucket(): Promise<void> {
   const c = getClient();
   try {
