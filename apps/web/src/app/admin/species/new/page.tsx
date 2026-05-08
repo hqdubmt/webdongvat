@@ -13,6 +13,7 @@ interface IdentifyResult {
   description?: string;
   confidence?: string;
   note?: string;
+  sources?: { label: string; url: string }[];
 }
 
 function toSlug(str: string) {
@@ -249,6 +250,19 @@ export default function NewSpeciesPage() {
                   {identified.description && <p className="text-gray-600 text-xs mt-1">{identified.description}</p>}
                   {identified.confidence && <p className="text-xs text-gray-400 mt-1">Độ tin cậy: <span className={identified.confidence === 'high' ? 'text-green-600' : identified.confidence === 'medium' ? 'text-yellow-600' : 'text-red-500'}>{identified.confidence === 'high' ? 'Cao' : identified.confidence === 'medium' ? 'Trung bình' : 'Thấp'}</span></p>}
                 </div>
+                {identified.sources && identified.sources.length > 0 && (
+                  <div className="mb-3 pt-2 border-t border-purple-200">
+                    <p className="text-xs text-gray-400 mb-1.5">Nguồn tham khảo:</p>
+                    <div className="flex flex-wrap gap-2">
+                      {identified.sources.map((s) => (
+                        <a key={s.label} href={s.url} target="_blank" rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline font-medium">
+                          {s.label} ↗
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="flex gap-2">
                   <button type="button" onClick={applyIdentified} className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-md text-xs font-medium">Điền vào form</button>
                   <button type="button" onClick={() => setIdentified(null)} className="text-gray-400 hover:text-gray-600 text-xs px-2">Bỏ qua</button>
