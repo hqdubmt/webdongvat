@@ -7,11 +7,14 @@ interface SampleImage {
   key: string;
   url: string;
   name: string;
+  link: string;
   lastModified: string;
 }
 
 interface ScanResult {
   found: boolean;
+  fromLibrary?: boolean;
+  libraryLink?: string;
   name?: string;
   scientificName?: string;
   conservationStatus?: string;
@@ -24,20 +27,8 @@ interface ScanResult {
 interface PendingFile {
   file: File;
   name: string;
+  link: string;
   preview: string;
-}
-
-function matchesLibrary(result: ScanResult, images: SampleImage[]): SampleImage[] {
-  if (!result.found) return [];
-  const haystack = images.filter((img) => img.name.trim());
-  return haystack.filter((img) => {
-    const n = img.name.toLowerCase();
-    return (
-      (result.name && n.includes(result.name.toLowerCase())) ||
-      (result.scientificName && n.includes(result.scientificName.toLowerCase())) ||
-      (result.name && result.name.toLowerCase().includes(n))
-    );
-  });
 }
 
 export default function LibraryPage() {
@@ -56,6 +47,12 @@ export default function LibraryPage() {
   const [scanningKey, setScanningKey] = useState<string | null>(null);
   const [scanResults, setScanResults] = useState<Record<string, ScanResult>>({});
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
+
+  // Inline edit state (name + link together)
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
+  const [editingLink, setEditingLink] = useState('');
+  const editNameRef = useRef<HTMLInputElement>(null);
 
   const fetchImages = useCallback(async () => {
     try {
@@ -77,6 +74,7 @@ export default function LibraryPage() {
     const newPending: PendingFile[] = files.map((f) => ({
       file: f,
       name: f.name.replace(/\.[^.]+$/, ''),
+      link: '',
       preview: URL.createObjectURL(f),
     }));
     setPending((p) => [...p, ...newPending]);
@@ -98,6 +96,7 @@ export default function LibraryPage() {
       const fd = new FormData();
       pending.forEach((p) => fd.append('images', p.file));
       fd.append('names', JSON.stringify(pending.map((p) => p.name)));
+      fd.append('links', JSON.stringify(pending.map((p) => p.link)));
       const res = await fetch('/api/samples', { method: 'POST', body: fd });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -121,6 +120,7 @@ export default function LibraryPage() {
       const blob = await fetch(img.url).then((r) => r.blob());
       const fd = new FormData();
       fd.append('image', blob, 'sample.jpg');
+      // Library comparison is handled server-side
       const res = await fetch('/api/ai/identify', { method: 'POST', body: fd });
       const data: ScanResult = await res.json();
       setScanResults((p) => ({ ...p, [img.key]: data }));
@@ -143,6 +143,27 @@ export default function LibraryPage() {
     }
   }
 
+  function startEdit(img: SampleImage) {
+    setEditingKey(img.key);
+    setEditingName(img.name);
+    setEditingLink(img.link || '');
+    setTimeout(() => editNameRef.current?.focus(), 50);
+  }
+
+  async function commitEdit(img: SampleImage) {
+    if (editingKey !== img.key) return;
+    setEditingKey(null);
+    const newName = editingName.trim();
+    const newLink = editingLink.trim();
+    if (newName === img.name && newLink === (img.link || '')) return;
+    setImages((p) => p.map((i) => i.key === img.key ? { ...i, name: newName, link: newLink } : i));
+    await fetch(`/api/samples/${btoa(img.key)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newName, link: newLink }),
+    });
+  }
+
   function handleCreateFromScan(img: SampleImage, result: ScanResult) {
     sessionStorage.setItem('ai_prefill', JSON.stringify({ ...result, imageUrl: img.url }));
     router.push('/admin/species/new');
@@ -154,7 +175,7 @@ export default function LibraryPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Thư viện ảnh mẫu</h1>
-          <p className="text-sm text-gray-500 mt-1">Upload ảnh, đặt tên, rồi quét AI để nhận dạng và tạo loài mới</p>
+          <p className="text-sm text-gray-500 mt-1">Upload ảnh, đặt tên, thêm link bài viết, rồi quét AI để nhận dạng</p>
         </div>
         <label className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer bg-green-600 hover:bg-green-700 text-white transition-colors">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/></svg>
@@ -166,19 +187,27 @@ export default function LibraryPage() {
       {/* Pending upload panel */}
       {pending.length > 0 && (
         <div className="mb-6 bg-white border border-green-200 rounded-xl shadow-sm p-4">
-          <p className="text-sm font-medium text-gray-700 mb-3">Đặt tên cho ảnh trước khi tải lên ({pending.length} ảnh):</p>
-          <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+          <p className="text-sm font-medium text-gray-700 mb-3">Đặt tên và link bài viết trước khi tải lên ({pending.length} ảnh):</p>
+          <div className="space-y-4 max-h-96 overflow-y-auto pr-1">
             {pending.map((p, i) => (
-              <div key={i} className="flex items-center gap-3">
+              <div key={i} className="flex items-start gap-3">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={p.preview} alt="" className="w-14 h-14 object-cover rounded-lg border border-gray-200 shrink-0" />
-                <input
-                  value={p.name}
-                  onChange={(e) => setPending((prev) => prev.map((item, idx) => idx === i ? { ...item, name: e.target.value } : item))}
-                  placeholder="Tên loài (VD: Hổ Bengal, Gấu Trúc...)"
-                  className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                />
-                <button onClick={() => removePending(i)} className="text-gray-400 hover:text-red-500 shrink-0">
+                <img src={p.preview} alt="" className="w-14 h-14 object-cover rounded-lg border border-gray-200 shrink-0 mt-0.5" />
+                <div className="flex-1 space-y-1.5">
+                  <input
+                    value={p.name}
+                    onChange={(e) => setPending((prev) => prev.map((item, idx) => idx === i ? { ...item, name: e.target.value } : item))}
+                    placeholder="Tên loài (VD: Hổ Bengal, Gấu Trúc...)"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  />
+                  <input
+                    value={p.link}
+                    onChange={(e) => setPending((prev) => prev.map((item, idx) => idx === i ? { ...item, link: e.target.value } : item))}
+                    placeholder="Link bài viết (tùy chọn, VD: https://...)"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 text-blue-600"
+                  />
+                </div>
+                <button onClick={() => removePending(i)} className="text-gray-400 hover:text-red-500 shrink-0 mt-1">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
                 </button>
               </div>
@@ -222,11 +251,10 @@ export default function LibraryPage() {
           {images.map((img) => {
             const result = scanResults[img.key];
             const isScanning = scanningKey === img.key;
-            const matches = result ? matchesLibrary(result, images) : [];
-            const isSelf = matches.some((m) => m.key === img.key);
+            const isLibraryMatch = result?.fromLibrary === true;
 
             return (
-              <div key={img.key} className={`bg-white rounded-xl border shadow-sm overflow-hidden ${isSelf ? 'border-purple-400 ring-2 ring-purple-300' : 'border-gray-200'}`}>
+              <div key={img.key} className={`bg-white rounded-xl border shadow-sm overflow-hidden ${isLibraryMatch ? 'border-purple-400 ring-2 ring-purple-300' : 'border-gray-200'}`}>
                 <div className="relative group aspect-square bg-gray-100">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={img.url} alt={img.name} className="w-full h-full object-cover" />
@@ -245,16 +273,55 @@ export default function LibraryPage() {
                       <svg className="animate-spin w-8 h-8 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
                     </div>
                   )}
-                  {isSelf && (
+                  {isLibraryMatch && (
                     <div className="absolute top-2 left-2 bg-purple-600 text-white text-xs px-2 py-0.5 rounded-full font-medium">
-                      ✓ Khớp
+                      ✓ Thư viện
                     </div>
                   )}
                 </div>
 
-                {/* Name */}
-                <div className="px-2.5 py-1.5 border-b border-gray-100">
-                  <p className="text-xs font-medium text-gray-700 truncate">{img.name || <span className="text-gray-400 italic">Chưa đặt tên</span>}</p>
+                {/* Name + link — click to edit */}
+                <div className="px-2 py-1.5 border-b border-gray-100">
+                  {editingKey === img.key ? (
+                    <div className="space-y-1">
+                      <input
+                        ref={editNameRef}
+                        value={editingName}
+                        onChange={(e) => setEditingName(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(img); if (e.key === 'Escape') setEditingKey(null); }}
+                        placeholder="Tên loài..."
+                        className="w-full text-xs border border-purple-400 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      />
+                      <input
+                        value={editingLink}
+                        onChange={(e) => setEditingLink(e.target.value)}
+                        onBlur={() => commitEdit(img)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(img); if (e.key === 'Escape') setEditingKey(null); }}
+                        placeholder="Link bài viết (tùy chọn)..."
+                        className="w-full text-xs border border-purple-300 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-purple-400 text-blue-600"
+                      />
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => startEdit(img)}
+                      title="Nhấn để chỉnh sửa tên và link"
+                      className="w-full text-left group"
+                    >
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs font-medium text-gray-700 truncate flex-1 group-hover:text-purple-600">
+                          {img.name || <span className="text-gray-400 italic font-normal">Nhấn để đặt tên...</span>}
+                        </span>
+                        <svg className="w-3 h-3 shrink-0 text-gray-300 group-hover:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                        </svg>
+                      </div>
+                      {img.link && (
+                        <span className="text-xs text-blue-500 truncate block mt-0.5 group-hover:text-blue-600">
+                          {img.link}
+                        </span>
+                      )}
+                    </button>
+                  )}
                 </div>
 
                 {/* Scan result */}
@@ -264,13 +331,21 @@ export default function LibraryPage() {
                       <>
                         {result.name && <p className="font-semibold text-gray-800 truncate">{result.name}</p>}
                         {result.scientificName && <p className="text-gray-500 italic truncate">{result.scientificName}</p>}
-                        {result.confidence && (
-                          <span className={`inline-block mt-1 px-1.5 py-0.5 rounded text-xs font-medium ${result.confidence === 'high' ? 'bg-green-100 text-green-700' : result.confidence === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-600'}`}>
-                            {result.confidence === 'high' ? 'Cao' : result.confidence === 'medium' ? 'Trung bình' : 'Thấp'}
-                          </span>
-                        )}
-                        {matches.length > 0 && (
-                          <p className="mt-1 text-purple-700 font-medium">✓ Tìm thấy {matches.length} ảnh khớp trong thư viện</p>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {result.fromLibrary && (
+                            <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">Từ thư viện</span>
+                          )}
+                          {result.confidence && (
+                            <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${result.confidence === 'high' ? 'bg-green-100 text-green-700' : result.confidence === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-600'}`}>
+                              {result.confidence === 'high' ? 'Cao' : result.confidence === 'medium' ? 'Trung bình' : 'Thấp'}
+                            </span>
+                          )}
+                        </div>
+                        {result.libraryLink && (
+                          <a href={result.libraryLink} target="_blank" rel="noopener noreferrer"
+                            className="mt-1 block text-blue-600 hover:underline truncate">
+                            Bài viết tham khảo ↗
+                          </a>
                         )}
                         {result.sources && result.sources.length > 0 && (
                           <div className="mt-1.5 flex flex-wrap gap-1">

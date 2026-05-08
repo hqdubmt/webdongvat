@@ -22,7 +22,10 @@ export async function GET() {
     objects.sort((a, b) => b.lastModified.getTime() - a.lastModified.getTime());
 
     const index = await readSampleIndex();
-    const data = objects.map((o) => ({ ...o, name: index[o.key] || '' }));
+    const data = objects.map((o) => {
+      const entry = index[o.key];
+      return { ...o, name: entry?.name || '', link: entry?.link || '' };
+    });
 
     return NextResponse.json({ data });
   } catch (err) {
@@ -37,7 +40,9 @@ export async function POST(req: NextRequest) {
     const formData = await req.formData();
     const files = formData.getAll('images') as File[];
     const namesRaw = formData.get('names') as string | null;
+    const linksRaw = formData.get('links') as string | null;
     const names: string[] = namesRaw ? JSON.parse(namesRaw) : [];
+    const links: string[] = linksRaw ? JSON.parse(linksRaw) : [];
 
     if (files.length === 0) return NextResponse.json({ error: 'No images provided' }, { status: 400 });
 
@@ -50,8 +55,9 @@ export async function POST(req: NextRequest) {
         const buffer = Buffer.from(await file.arrayBuffer());
         await client.putObject(BUCKET, objectKey, buffer, buffer.length, { 'Content-Type': file.type || 'image/jpeg' });
         const name = names[i] || path.basename(file.name, ext);
-        index[objectKey] = name;
-        return { key: objectKey, url: publicUrl(objectKey), name };
+        const link = links[i] || '';
+        index[objectKey] = { name, link };
+        return { key: objectKey, url: publicUrl(objectKey), name, link };
       })
     );
 
