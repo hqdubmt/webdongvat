@@ -151,7 +151,7 @@ export default function SplitView({ species }: { species: Species[] }) {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/>
                 </svg>
               )}
-              <input ref={scanInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleScan} disabled={scanning} />
+              <input ref={scanInputRef} type="file" accept="image/*" className="hidden" onChange={handleScan} disabled={scanning} />
             </label>
           </div>
 
