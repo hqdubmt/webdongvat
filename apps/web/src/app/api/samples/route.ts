@@ -1,33 +1,53 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-
-const API_BASE = process.env.API_INTERNAL_URL || 'http://localhost:3001';
-
-async function getAuthHeader(): Promise<Record<string, string>> {
-  const token = (await cookies()).get('admin_token')?.value;
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
+import path from 'path';
+import { getClient, BUCKET, publicUrl, ensureBucket } from '@/lib/minio';
 
 export async function GET() {
-  const authHeader = await getAuthHeader();
-  const res = await fetch(`${API_BASE}/api/samples`, {
-    headers: authHeader,
-    cache: 'no-store',
-  });
-  const data = await res.json();
-  return NextResponse.json(data, { status: res.status });
+  try {
+    const client = getClient();
+    await ensureBucket();
+
+    const objects: { key: string; url: string; lastModified: Date }[] = [];
+
+    await new Promise<void>((resolve, reject) => {
+      const stream = client.listObjects(BUCKET, 'samples/', true);
+      stream.on('data', (obj) => {
+        if (obj.name) objects.push({ key: obj.name, url: publicUrl(obj.name), lastModified: obj.lastModified ?? new Date(0) });
+      });
+      stream.on('end', resolve);
+      stream.on('error', reject);
+    });
+
+    objects.sort((a, b) => new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime());
+    return NextResponse.json({ data: objects });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 }
 
 export async function POST(req: NextRequest) {
-  const authHeader = await getAuthHeader();
-  const contentType = req.headers.get('content-type') || '';
-  const body = await req.arrayBuffer();
+  try {
+    await ensureBucket();
+    const client = getClient();
+    const formData = await req.formData();
+    const files = formData.getAll('images') as File[];
 
-  const res = await fetch(`${API_BASE}/api/samples`, {
-    method: 'POST',
-    headers: { ...authHeader, 'content-type': contentType },
-    body: Buffer.from(body),
-  });
-  const data = await res.json();
-  return NextResponse.json(data, { status: res.status });
+    if (files.length === 0) return NextResponse.json({ error: 'No images provided' }, { status: 400 });
+
+    const results = await Promise.all(
+      files.map(async (file) => {
+        const ext = path.extname(file.name) || '.jpg';
+        const objectKey = `samples/${crypto.randomUUID()}${ext}`;
+        const buffer = Buffer.from(await file.arrayBuffer());
+        await client.putObject(BUCKET, objectKey, buffer, buffer.length, { 'Content-Type': file.type || 'image/jpeg' });
+        return { key: objectKey, url: publicUrl(objectKey) };
+      })
+    );
+
+    return NextResponse.json({ data: results }, { status: 201 });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 }

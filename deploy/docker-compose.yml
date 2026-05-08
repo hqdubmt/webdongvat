@@ -119,6 +119,13 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin@123}
       JWT_SECRET: ${JWT_SECRET:-masterlms-super-secret-key-change-in-production-2024}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-admin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-Minio@123456789}
+      MINIO_BUCKET: ${MINIO_BUCKET:-species-media}
+      MINIO_USE_SSL: "false"
+      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-}
     depends_on:
       api:
         condition: service_healthy

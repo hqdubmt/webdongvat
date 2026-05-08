@@ -1,20 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-
-const API_BASE = process.env.API_INTERNAL_URL || 'http://localhost:3001';
-
-async function getAuthHeader(): Promise<Record<string, string>> {
-  const token = (await cookies()).get('admin_token')?.value;
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
+import { getClient, BUCKET } from '@/lib/minio';
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ key: string }> }) {
-  const { key } = await params;
-  const authHeader = await getAuthHeader();
-  const res = await fetch(`${API_BASE}/api/samples/${key}`, {
-    method: 'DELETE',
-    headers: authHeader,
-  });
-  const data = await res.json();
-  return NextResponse.json(data, { status: res.status });
+  try {
+    const { key } = await params;
+    const objectKey = Buffer.from(key, 'base64').toString('utf8');
+    if (!objectKey.startsWith('samples/')) {
+      return NextResponse.json({ error: 'Invalid key' }, { status: 400 });
+    }
+    await getClient().removeObject(BUCKET, objectKey);
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 }
