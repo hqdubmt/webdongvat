@@ -5,6 +5,7 @@ import type { Metadata } from 'next';
 import { fetchSpeciesDetail, fetchSpeciesList } from '@/lib/api';
 import { getConservationStatusColor, getGoogleMapsUrl, getVideoEmbedUrl } from '@/lib/utils';
 import SpeciesMapWrapper from '@/components/SpeciesMapWrapper';
+import SpeciesScanWidget from '@/components/SpeciesScanWidget';
 
 export const dynamic = 'force-dynamic';
 
@@ -260,6 +261,9 @@ export default async function SpeciesDetailPage({ params }: PageProps) {
               </div>
             </div>
           )}
+
+          {/* Scan widget */}
+          <SpeciesScanWidget />
 
           {/* Back button */}
           <Link
