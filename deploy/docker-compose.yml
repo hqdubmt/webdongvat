@@ -75,6 +75,7 @@ services:
       NODE_ENV: production
       PORT: 3001
       DATABASE_URL: postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-Admin@123456}@postgres:5432/${POSTGRES_DB:-wildlife_db}?schema=public
+      JWT_SECRET: ${JWT_SECRET:-masterlms-super-secret-key-change-in-production-2024}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:-Redis@123456}
@@ -116,7 +117,7 @@ services:
       API_INTERNAL_URL: http://api:3001
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin@123}
-      JWT_SECRET: ${JWT_SECRET:-change-this-secret}
+      JWT_SECRET: ${JWT_SECRET:-masterlms-super-secret-key-change-in-production-2024}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     depends_on:
       api:
