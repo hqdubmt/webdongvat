@@ -219,61 +219,8 @@ export async function POST(req: NextRequest) {
     return json;
   }
 
-  // Try Gemini first if set (and no Anthropic key)
-  if (process.env.GEMINI_API_KEY && !process.env.ANTHROPIC_API_KEY) {
-    try {
-      const json = await identifyWithGemini(base64, mediaType, libraryImages);
-      return NextResponse.json(enrichFromLibrary(json));
-    } catch {
-      // Gemini failed — fall back to hash matching
-      const allImages = [...speciesDbImages, ...libraryImages];
-      const match = await hashMatch(base64, allImages);
-      if (match) {
-        return NextResponse.json({ found: true, fromLibrary: !match.slug, name: match.name, scientificName: match.scientificName || '', conservationStatus: match.conservationStatus || '', description: match.description || '', confidence: 'high', ...(match.slug ? { matchedSlug: match.slug } : {}), ...(match.link ? { libraryLink: match.link } : {}) });
-      }
-      return NextResponse.json({ found: false, note: 'Không tìm thấy ảnh khớp trong hệ thống.' });
-    }
-  }
-
-  // Use Anthropic Claude
-  const speciesMap: Record<string, LibraryImage[]> = {};
-  for (const img of libraryImages) {
-    if (!speciesMap[img.name]) speciesMap[img.name] = [];
-    speciesMap[img.name].push(img);
-  }
-  const speciesEntries = Object.entries(speciesMap).slice(0, 12);
-
-  let messageContent: Anthropic.ContentBlockParam[];
-  if (speciesEntries.length > 0) {
-    messageContent = [
-      { type: 'text', text: `Tôi có ${speciesEntries.length} loài trong thư viện mẫu:` },
-      ...speciesEntries.flatMap<Anthropic.ContentBlockParam>(([name, imgs], i) => [
-        { type: 'text', text: `\nLoài ${i + 1}: "${name}" (${imgs.length} góc chụp)` },
-        ...imgs.map(img => ({ type: 'image', source: { type: 'base64', media_type: img.mediaType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif', data: img.b64 } } as Anthropic.ContentBlockParam)),
-      ]),
-      { type: 'text', text: '\nĐây là ảnh cần nhận dạng:' },
-      { type: 'image', source: { type: 'base64', media_type: mediaType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif', data: base64 } },
-      { type: 'text', text: `Bước 1: So sánh với thư viện. Nếu CÙNG LOÀI đặt "fromLibrary": true.\nBước 2: Nếu không khớp nhận dạng từ kiến thức, đặt "fromLibrary": false.\n\n${buildJsonPrompt(true)}` },
-    ];
-  } else {
-    messageContent = [
-      { type: 'image', source: { type: 'base64', media_type: mediaType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif', data: base64 } },
-      { type: 'text', text: `Nhìn vào ảnh động vật này.\n\n${buildJsonPrompt(false)}` },
-    ];
-  }
-
-  try {
-    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    const message = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
-      messages: [{ role: 'user', content: messageContent }],
-    });
-    const raw = message.content[0].type === 'text' ? message.content[0].text.trim() : '{}';
-    const json = JSON.parse(raw.replace(/^```json\n?|```$/g, '').trim());
-    return NextResponse.json(enrichFromLibrary(json));
-  } catch {
-    // Claude failed — fall back to hash matching
+  // Helper: hash matching fallback
+  async function hashFallback() {
     const allImages = [...speciesDbImages, ...libraryImages];
     const match = await hashMatch(base64, allImages);
     if (match) {
@@ -281,4 +228,60 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ found: false, note: 'Không tìm thấy ảnh khớp trong hệ thống.' });
   }
+
+  // 1. Try Anthropic Claude
+  if (process.env.ANTHROPIC_API_KEY) {
+    const speciesMap: Record<string, LibraryImage[]> = {};
+    for (const img of libraryImages) {
+      if (!speciesMap[img.name]) speciesMap[img.name] = [];
+      speciesMap[img.name].push(img);
+    }
+    const speciesEntries = Object.entries(speciesMap).slice(0, 12);
+
+    let messageContent: Anthropic.ContentBlockParam[];
+    if (speciesEntries.length > 0) {
+      messageContent = [
+        { type: 'text', text: `Tôi có ${speciesEntries.length} loài trong thư viện mẫu:` },
+        ...speciesEntries.flatMap<Anthropic.ContentBlockParam>(([name, imgs], i) => [
+          { type: 'text', text: `\nLoài ${i + 1}: "${name}" (${imgs.length} góc chụp)` },
+          ...imgs.map(img => ({ type: 'image', source: { type: 'base64', media_type: img.mediaType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif', data: img.b64 } } as Anthropic.ContentBlockParam)),
+        ]),
+        { type: 'text', text: '\nĐây là ảnh cần nhận dạng:' },
+        { type: 'image', source: { type: 'base64', media_type: mediaType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif', data: base64 } },
+        { type: 'text', text: `Bước 1: So sánh với thư viện. Nếu CÙNG LOÀI đặt "fromLibrary": true.\nBước 2: Nếu không khớp nhận dạng từ kiến thức, đặt "fromLibrary": false.\n\n${buildJsonPrompt(true)}` },
+      ];
+    } else {
+      messageContent = [
+        { type: 'image', source: { type: 'base64', media_type: mediaType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif', data: base64 } },
+        { type: 'text', text: `Nhìn vào ảnh động vật này.\n\n${buildJsonPrompt(false)}` },
+      ];
+    }
+
+    try {
+      const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      const message = await client.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: messageContent }],
+      });
+      const raw = message.content[0].type === 'text' ? message.content[0].text.trim() : '{}';
+      const json = JSON.parse(raw.replace(/^```json\n?|```$/g, '').trim());
+      return NextResponse.json(enrichFromLibrary(json));
+    } catch {
+      // Claude failed — try Gemini next
+    }
+  }
+
+  // 2. Try Gemini
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      const json = await identifyWithGemini(base64, mediaType, libraryImages);
+      return NextResponse.json(enrichFromLibrary(json));
+    } catch {
+      // Gemini failed — fall back to hash matching
+    }
+  }
+
+  // 3. Hash matching fallback
+  return hashFallback();
 }
