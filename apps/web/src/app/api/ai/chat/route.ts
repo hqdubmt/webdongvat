@@ -142,6 +142,15 @@ function localSearch(messages: ChatMessage[], species: SpeciesItem[]): { text: s
   };
 }
 
+// ── Circuit breaker (skip API for 5 min after capacity/quota error) ────────────
+
+const apiBreaker: Record<string, number> = {};
+const BREAKER_TTL = 5 * 60 * 1000;
+const isApiOpen = (name: string) => !apiBreaker[name] || Date.now() > apiBreaker[name];
+const tripBreaker = (name: string) => { apiBreaker[name] = Date.now() + BREAKER_TTL; };
+const isCapacityError = (e: unknown) =>
+  /429|402|quota|credit|exceeded|RESOURCE_EXHAUSTED|insufficient|balance|billing/i.test(String(e));
+
 // ── Route handler ──────────────────────────────────────────────────────────
 
 export async function POST(req: Request) {
@@ -150,7 +159,7 @@ export async function POST(req: Request) {
   const context = buildContext(speciesList);
 
   // 1. Try Anthropic
-  if (process.env.ANTHROPIC_API_KEY) {
+  if (process.env.ANTHROPIC_API_KEY && isApiOpen('anthropic')) {
     try {
       const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
       const msg = await client.messages.create({
@@ -161,13 +170,14 @@ export async function POST(req: Request) {
       });
       const text = msg.content[0].type === 'text' ? msg.content[0].text : '';
       if (text) return textStream(text);
-    } catch {
+    } catch (e) {
+      if (isCapacityError(e)) tripBreaker('anthropic');
       // fall through to Gemini
     }
   }
 
   // 2. Try Gemini
-  if (process.env.GEMINI_API_KEY) {
+  if (process.env.GEMINI_API_KEY && isApiOpen('gemini')) {
     try {
       const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
       const model = genAI.getGenerativeModel({
@@ -183,7 +193,8 @@ export async function POST(req: Request) {
       const result = await chat.sendMessage(lastMsg);
       const text = result.response.text().trim();
       if (text) return textStream(text);
-    } catch {
+    } catch (e) {
+      if (isCapacityError(e)) tripBreaker('gemini');
       // fall through to DB
     }
   }

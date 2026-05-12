@@ -4,8 +4,10 @@ import { useState, useRef } from 'react';
 
 interface ScanResult {
   found: boolean;
+  source?: 'anthropic' | 'gemini' | 'hash_match' | 'not_found';
   fromLibrary?: boolean;
   libraryLink?: string;
+  matchedSlug?: string;
   name?: string;
   scientificName?: string;
   conservationStatus?: string;
@@ -71,8 +73,13 @@ export default function SpeciesScanWidget() {
                   {result.conservationStatus && <p className="text-orange-600 font-medium text-xs">{result.conservationStatus}</p>}
                   {result.description && <p className="text-gray-600 text-xs mt-1 leading-relaxed">{result.description}</p>}
                   {result.fromLibrary && <p className="text-xs font-semibold text-blue-700 mt-1">Đã có trong thư viện của bạn</p>}
-                  {result.confidence && !result.fromLibrary && (
-                    <p className="text-xs text-gray-400">Độ tin cậy: <span className={result.confidence === 'high' ? 'text-green-600 font-medium' : result.confidence === 'medium' ? 'text-yellow-600 font-medium' : 'text-red-500 font-medium'}>{result.confidence === 'high' ? 'Cao' : result.confidence === 'medium' ? 'Trung bình' : 'Thấp'}</span></p>
+                  {result.confidence && (
+                    <p className="text-xs text-gray-400 mt-0.5">Độ tin cậy: <span className={result.confidence === 'high' ? 'text-green-600 font-medium' : result.confidence === 'medium' ? 'text-yellow-600 font-medium' : 'text-red-500 font-medium'}>{result.confidence === 'high' ? 'Cao' : result.confidence === 'medium' ? 'Trung bình' : 'Thấp'}</span></p>
+                  )}
+                  {result.source && (
+                    <p className="text-xs text-gray-300 mt-0.5">
+                      {result.source === 'anthropic' ? '⚡ Claude AI' : result.source === 'gemini' ? '⚡ Gemini AI' : result.source === 'hash_match' ? '🔍 So khớp ảnh' : ''}
+                    </p>
                   )}
                 </div>
                 <button onClick={() => setResult(null)} className="text-gray-300 hover:text-gray-500 shrink-0 text-base leading-none">✕</button>

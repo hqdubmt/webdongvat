@@ -81,6 +81,8 @@ async function fetchSpeciesDbImages(limit = 60): Promise<LibraryImage[]> {
   }
 }
 
+// ── Image hashing ─────────────────────────────────────────────────────────────
+
 // Pre-computed cosine table for 32x32 → 8x8 DCT (pHash)
 const COS_TABLE_8_32: number[][] = (() => {
   const table: number[][] = [];
@@ -93,7 +95,6 @@ const COS_TABLE_8_32: number[][] = (() => {
   return table;
 })();
 
-// Perceptual Hash (pHash) via 2D DCT — robust to brightness/contrast changes
 async function computePHash(b64: string): Promise<boolean[] | null> {
   try {
     const { data } = await sharp(Buffer.from(b64, 'base64'))
@@ -102,7 +103,6 @@ async function computePHash(b64: string): Promise<boolean[] | null> {
       .raw()
       .toBuffer({ resolveWithObject: true });
     const pixels = Array.from(data as Uint8Array);
-    // Separable 2D DCT: row-wise first, then column-wise
     const rowDCT: number[][] = Array.from({ length: 32 }, () => new Array(8).fill(0));
     for (let row = 0; row < 32; row++) {
       for (let k = 0; k < 8; k++) {
@@ -119,7 +119,6 @@ async function computePHash(b64: string): Promise<boolean[] | null> {
         dctCoeffs.push(sum);
       }
     }
-    // Skip DC component (index 0) — sensitive to overall brightness
     const ac = dctCoeffs.slice(1);
     const sorted = [...ac].sort((a, b) => a - b);
     const median = sorted[Math.floor(sorted.length / 2)];
@@ -129,7 +128,6 @@ async function computePHash(b64: string): Promise<boolean[] | null> {
   }
 }
 
-// Difference Hash (dHash) — captures edges and gradients
 async function computeDHash(b64: string): Promise<boolean[] | null> {
   try {
     const { data } = await sharp(Buffer.from(b64, 'base64'))
@@ -150,7 +148,6 @@ async function computeDHash(b64: string): Promise<boolean[] | null> {
   }
 }
 
-// RGB color histogram — distinguishes species by color distribution
 async function computeColorHistogram(b64: string): Promise<number[] | null> {
   const BINS = 8;
   try {
@@ -178,13 +175,22 @@ async function computeColorHistogram(b64: string): Promise<number[] | null> {
 
 type ImageFeatures = { pHash: boolean[] | null; dHash: boolean[] | null; colorHist: number[] | null };
 
+// Decode and resize once to avoid 3× full JPEG decodes per image
 async function computeFeatures(b64: string): Promise<ImageFeatures> {
-  const [pHash, dHash, colorHist] = await Promise.all([
-    computePHash(b64),
-    computeDHash(b64),
-    computeColorHistogram(b64),
-  ]);
-  return { pHash, dHash, colorHist };
+  try {
+    const resized = await sharp(Buffer.from(b64, 'base64'))
+      .resize(64, 64, { fit: 'fill' })
+      .toBuffer();
+    const small = resized.toString('base64');
+    const [pHash, dHash, colorHist] = await Promise.all([
+      computePHash(small),
+      computeDHash(small),
+      computeColorHistogram(small),
+    ]);
+    return { pHash, dHash, colorHist };
+  } catch {
+    return { pHash: null, dHash: null, colorHist: null };
+  }
 }
 
 function hammingDistance(a: boolean[], b: boolean[]): number {
@@ -219,22 +225,50 @@ function featureSimilarity(f1: ImageFeatures, f2: ImageFeatures): number {
   return weight > 0 ? score / weight : 0;
 }
 
-async function hashMatch(base64: string, images: LibraryImage[], threshold = 0.75): Promise<LibraryImage | null> {
-  if (!images.length) return null;
-  const inputFeatures = await computeFeatures(base64);
-  const scored = await Promise.all(
-    images.map(async (img) => {
-      try {
-        const features = await computeFeatures(img.b64);
-        return { img, score: featureSimilarity(inputFeatures, features) };
-      } catch {
-        return { img, score: 0 };
-      }
-    })
-  );
-  const best = scored.reduce((a, b) => a.score > b.score ? a : b);
-  return best.score >= threshold ? best.img : null;
+// ── Module-level caches (persist across requests in same process) ─────────────
+
+type CachedEntry = { img: LibraryImage; features: ImageFeatures };
+const hashCache: { entries: CachedEntry[] | null; expiry: number } = { entries: null, expiry: 0 };
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
+// Circuit breaker: skip API if it recently failed with a capacity/quota error
+const apiBreaker: Record<string, number> = {}; // key → timestamp when backoff expires
+const BREAKER_TTL = 5 * 60 * 1000; // 5 minutes backoff
+
+function isApiOpen(name: string): boolean {
+  return !apiBreaker[name] || Date.now() > apiBreaker[name];
 }
+
+function tripBreaker(name: string): void {
+  apiBreaker[name] = Date.now() + BREAKER_TTL;
+}
+
+function isCapacityError(e: unknown): boolean {
+  const msg = String(e);
+  return /429|402|quota|credit|exceeded|RESOURCE_EXHAUSTED|insufficient|balance|billing/i.test(msg);
+}
+
+async function getOrBuildCache(): Promise<CachedEntry[]> {
+  if (hashCache.entries && Date.now() < hashCache.expiry) return hashCache.entries;
+  const [library, db] = await Promise.all([fetchLibraryImages(30), fetchSpeciesDbImages(60)]);
+  const all = [...db, ...library];
+  hashCache.entries = await Promise.all(all.map(async img => ({ img, features: await computeFeatures(img.b64) })));
+  hashCache.expiry = Date.now() + CACHE_TTL;
+  return hashCache.entries;
+}
+
+async function hashMatchCached(base64: string, cached: CachedEntry[], threshold = 0.75): Promise<LibraryImage | null> {
+  if (!cached.length) return null;
+  const inputFeatures = await computeFeatures(base64);
+  let bestScore = 0, bestImg: LibraryImage | null = null;
+  for (const { img, features } of cached) {
+    const score = featureSimilarity(inputFeatures, features);
+    if (score > bestScore) { bestScore = score; bestImg = img; }
+  }
+  return bestScore >= threshold ? bestImg : null;
+}
+
+// ── Prompt / AI helpers ───────────────────────────────────────────────────────
 
 function buildJsonPrompt(hasLibrary: boolean): string {
   return `Trả về JSON thuần (không markdown):
@@ -298,6 +332,8 @@ async function identifyWithGemini(
   return JSON.parse(raw.replace(/^```json\n?|```$/g, '').trim());
 }
 
+// ── Route handler ─────────────────────────────────────────────────────────────
+
 export async function POST(req: NextRequest) {
   const formData = await req.formData();
   const file = formData.get('image') as File | null;
@@ -307,30 +343,19 @@ export async function POST(req: NextRequest) {
   const base64 = Buffer.from(buffer).toString('base64');
   const mediaType = (file.type || 'image/jpeg') as string;
 
-  const [libraryImages, speciesDbImages] = await Promise.all([
-    fetchLibraryImages(30),
-    fetchSpeciesDbImages(60),
-  ]);
+  // Kick off cache build immediately (won't block API calls if cache is cold)
+  const cachePromise = getOrBuildCache();
 
-  const allImages = [...speciesDbImages, ...libraryImages];
+  // Get library images from warm cache or fall back to fresh fetch
+  const libraryImages: LibraryImage[] = hashCache.entries
+    ? hashCache.entries.filter(e => !e.img.slug).map(e => e.img)
+    : await fetchLibraryImages(30);
 
-  function matchResponse(match: LibraryImage) {
-    return NextResponse.json({
-      found: true,
-      fromLibrary: !match.slug,
-      name: match.name,
-      scientificName: match.scientificName || '',
-      conservationStatus: match.conservationStatus || '',
-      description: match.description || '',
-      confidence: 'high',
-      ...(match.slug ? { matchedSlug: match.slug } : {}),
-      ...(match.link ? { libraryLink: match.link } : {}),
-    });
-  }
-
-  function enrichFromAI(json: Record<string, unknown>) {
+  // Look up slug/metadata for a species name across all loaded images
+  function enrichFromAI(json: Record<string, unknown>): Record<string, unknown> {
     if (json.fromLibrary && json.name) {
-      const matched = allImages.find((l) => l.name === json.name);
+      const searchIn = hashCache.entries ? hashCache.entries.map(e => e.img) : libraryImages;
+      const matched = searchIn.find(img => img.name === json.name);
       if (matched) {
         if (matched.slug) json.matchedSlug = matched.slug;
         if (matched.link) json.libraryLink = matched.link;
@@ -343,7 +368,7 @@ export async function POST(req: NextRequest) {
   }
 
   // 1. Try Anthropic Claude
-  if (process.env.ANTHROPIC_API_KEY) {
+  if (process.env.ANTHROPIC_API_KEY && isApiOpen('anthropic')) {
     const speciesMap: Record<string, LibraryImage[]> = {};
     for (const img of libraryImages) {
       if (!speciesMap[img.name]) speciesMap[img.name] = [];
@@ -374,27 +399,41 @@ export async function POST(req: NextRequest) {
       });
       const raw = message.content[0].type === 'text' ? message.content[0].text.trim() : '{}';
       const json = JSON.parse(raw.replace(/^```json\n?|```$/g, '').trim());
-      return NextResponse.json(enrichFromAI(json));
-    } catch {
+      return NextResponse.json({ ...enrichFromAI(json), source: 'anthropic' });
+    } catch (e) {
+      if (isCapacityError(e)) tripBreaker('anthropic');
       // fall through to Gemini
     }
   }
 
   // 2. Try Gemini
-  if (process.env.GEMINI_API_KEY) {
+  if (process.env.GEMINI_API_KEY && isApiOpen('gemini')) {
     try {
       const json = await identifyWithGemini(base64, mediaType, libraryImages);
-      return NextResponse.json(enrichFromAI(json));
-    } catch {
-      // fall through to DB
+      return NextResponse.json({ ...enrichFromAI(json), source: 'gemini' });
+    } catch (e) {
+      if (isCapacityError(e)) tripBreaker('gemini');
+      // fall through to hash match
     }
   }
 
-  // 3. Hash match against DB
-  if (allImages.length > 0) {
-    const match = await hashMatch(base64, allImages);
-    if (match) return matchResponse(match);
+  // 3. Hash match using cached features (waits for cache if still building)
+  const cached = await cachePromise;
+  const match = await hashMatchCached(base64, cached);
+  if (match) {
+    return NextResponse.json({
+      found: true,
+      source: 'hash_match',
+      fromLibrary: !match.slug,
+      name: match.name,
+      scientificName: match.scientificName || '',
+      conservationStatus: match.conservationStatus || '',
+      description: match.description || '',
+      confidence: 'high',
+      ...(match.slug ? { matchedSlug: match.slug } : {}),
+      ...(match.link ? { libraryLink: match.link } : {}),
+    });
   }
 
-  return NextResponse.json({ found: false, note: 'Không tìm thấy loài khớp trong hệ thống.' });
+  return NextResponse.json({ found: false, source: 'not_found', note: 'Không tìm thấy loài khớp trong hệ thống.' });
 }

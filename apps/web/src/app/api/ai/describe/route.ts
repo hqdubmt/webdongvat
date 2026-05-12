@@ -22,6 +22,14 @@ function buildFallbackDescription(name: string, scientificName: string, conserva
   return `${name} (${scientificName}) là một loài động vật hoang dã. ${statusText}Chưa có mô tả chi tiết trong hệ thống. Vui lòng cập nhật thông tin sau khi có nguồn tham khảo phù hợp.`;
 }
 
+// Circuit breaker: skip API for 5 min after capacity/quota error
+const apiBreaker: Record<string, number> = {};
+const BREAKER_TTL = 5 * 60 * 1000;
+const isApiOpen = (name: string) => !apiBreaker[name] || Date.now() > apiBreaker[name];
+const tripBreaker = (name: string) => { apiBreaker[name] = Date.now() + BREAKER_TTL; };
+const isCapacityError = (e: unknown) =>
+  /429|402|quota|credit|exceeded|RESOURCE_EXHAUSTED|insufficient|balance|billing/i.test(String(e));
+
 export async function POST(req: Request) {
   const { name, scientificName, conservationStatus, slug } = await req.json();
   if (!name || !scientificName) {
@@ -31,7 +39,7 @@ export async function POST(req: Request) {
   const prompt = buildPrompt(name, scientificName, conservationStatus);
 
   // 1. Try Anthropic
-  if (process.env.ANTHROPIC_API_KEY) {
+  if (process.env.ANTHROPIC_API_KEY && isApiOpen('anthropic')) {
     try {
       const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
       const message = await client.messages.create({
@@ -41,20 +49,22 @@ export async function POST(req: Request) {
       });
       const text = message.content[0].type === 'text' ? message.content[0].text : '';
       if (text) return NextResponse.json({ description: text });
-    } catch {
+    } catch (e) {
+      if (isCapacityError(e)) tripBreaker('anthropic');
       // fall through to Gemini
     }
   }
 
   // 2. Try Gemini
-  if (process.env.GEMINI_API_KEY) {
+  if (process.env.GEMINI_API_KEY && isApiOpen('gemini')) {
     try {
       const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
       const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
       const result = await model.generateContent(prompt);
       const text = result.response.text().trim();
       if (text) return NextResponse.json({ description: text });
-    } catch {
+    } catch (e) {
+      if (isCapacityError(e)) tripBreaker('gemini');
       // fall through to DB
     }
   }
