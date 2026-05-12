@@ -81,40 +81,159 @@ async function fetchSpeciesDbImages(limit = 60): Promise<LibraryImage[]> {
   }
 }
 
-async function computeAHash(b64: string): Promise<boolean[] | null> {
+// Pre-computed cosine table for 32x32 → 8x8 DCT (pHash)
+const COS_TABLE_8_32: number[][] = (() => {
+  const table: number[][] = [];
+  for (let k = 0; k < 8; k++) {
+    table[k] = [];
+    for (let n = 0; n < 32; n++) {
+      table[k][n] = Math.cos(Math.PI * k * (2 * n + 1) / 64);
+    }
+  }
+  return table;
+})();
+
+// Perceptual Hash (pHash) via 2D DCT — robust to brightness/contrast changes
+async function computePHash(b64: string): Promise<boolean[] | null> {
   try {
     const { data } = await sharp(Buffer.from(b64, 'base64'))
-      .resize(8, 8, { fit: 'fill' })
+      .resize(32, 32, { fit: 'fill' })
       .grayscale()
       .raw()
       .toBuffer({ resolveWithObject: true });
     const pixels = Array.from(data as Uint8Array);
-    const avg = pixels.reduce((a, b) => a + b, 0) / pixels.length;
-    return pixels.map(p => p >= avg);
+    // Separable 2D DCT: row-wise first, then column-wise
+    const rowDCT: number[][] = Array.from({ length: 32 }, () => new Array(8).fill(0));
+    for (let row = 0; row < 32; row++) {
+      for (let k = 0; k < 8; k++) {
+        let sum = 0;
+        for (let n = 0; n < 32; n++) sum += pixels[row * 32 + n] * COS_TABLE_8_32[k][n];
+        rowDCT[row][k] = sum;
+      }
+    }
+    const dctCoeffs: number[] = [];
+    for (let u = 0; u < 8; u++) {
+      for (let v = 0; v < 8; v++) {
+        let sum = 0;
+        for (let row = 0; row < 32; row++) sum += rowDCT[row][u] * COS_TABLE_8_32[v][row];
+        dctCoeffs.push(sum);
+      }
+    }
+    // Skip DC component (index 0) — sensitive to overall brightness
+    const ac = dctCoeffs.slice(1);
+    const sorted = [...ac].sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    return ac.map(v => v >= median);
   } catch {
     return null;
   }
 }
 
+// Difference Hash (dHash) — captures edges and gradients
+async function computeDHash(b64: string): Promise<boolean[] | null> {
+  try {
+    const { data } = await sharp(Buffer.from(b64, 'base64'))
+      .resize(9, 8, { fit: 'fill' })
+      .grayscale()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const pixels = Array.from(data as Uint8Array);
+    const hash: boolean[] = [];
+    for (let row = 0; row < 8; row++) {
+      for (let col = 0; col < 8; col++) {
+        hash.push(pixels[row * 9 + col] < pixels[row * 9 + col + 1]);
+      }
+    }
+    return hash;
+  } catch {
+    return null;
+  }
+}
+
+// RGB color histogram — distinguishes species by color distribution
+async function computeColorHistogram(b64: string): Promise<number[] | null> {
+  const BINS = 8;
+  try {
+    const { data, info } = await sharp(Buffer.from(b64, 'base64'))
+      .resize(64, 64, { fit: 'fill' })
+      .toColorspace('srgb')
+      .removeAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const ch = info.channels;
+    const hist = new Array(BINS * ch).fill(0);
+    const pixels = data as Uint8Array;
+    for (let i = 0; i < pixels.length; i += ch) {
+      for (let c = 0; c < ch; c++) {
+        const bin = Math.min(Math.floor(pixels[i + c] / 256 * BINS), BINS - 1);
+        hist[c * BINS + bin]++;
+      }
+    }
+    const total = hist.reduce((a, b) => a + b, 0);
+    return total > 0 ? hist.map(v => v / total) : null;
+  } catch {
+    return null;
+  }
+}
+
+type ImageFeatures = { pHash: boolean[] | null; dHash: boolean[] | null; colorHist: number[] | null };
+
+async function computeFeatures(b64: string): Promise<ImageFeatures> {
+  const [pHash, dHash, colorHist] = await Promise.all([
+    computePHash(b64),
+    computeDHash(b64),
+    computeColorHistogram(b64),
+  ]);
+  return { pHash, dHash, colorHist };
+}
+
 function hammingDistance(a: boolean[], b: boolean[]): number {
   let dist = 0;
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) dist++;
+  const len = Math.min(a.length, b.length);
+  for (let i = 0; i < len; i++) if (a[i] !== b[i]) dist++;
   return dist;
 }
 
-async function hashMatch(base64: string, images: LibraryImage[], threshold = 12): Promise<LibraryImage | null> {
-  const inputHash = await computeAHash(base64);
-  if (!inputHash) return null;
+function histogramIntersection(a: number[], b: number[]): number {
+  let sum = 0;
+  const len = Math.min(a.length, b.length);
+  for (let i = 0; i < len; i++) sum += Math.min(a[i], b[i]);
+  return sum;
+}
 
-  const entries: { img: LibraryImage; dist: number }[] = [];
-  await Promise.all(images.map(async (img) => {
-    const h = await computeAHash(img.b64);
-    if (h) entries.push({ img, dist: hammingDistance(inputHash, h) });
-  }));
+// Weighted similarity: pHash 40% + dHash 35% + colorHist 25%
+function featureSimilarity(f1: ImageFeatures, f2: ImageFeatures): number {
+  let score = 0, weight = 0;
+  if (f1.pHash && f2.pHash) {
+    score += (1 - hammingDistance(f1.pHash, f2.pHash) / Math.min(f1.pHash.length, f2.pHash.length)) * 0.4;
+    weight += 0.4;
+  }
+  if (f1.dHash && f2.dHash) {
+    score += (1 - hammingDistance(f1.dHash, f2.dHash) / Math.min(f1.dHash.length, f2.dHash.length)) * 0.35;
+    weight += 0.35;
+  }
+  if (f1.colorHist && f2.colorHist) {
+    score += histogramIntersection(f1.colorHist, f2.colorHist) * 0.25;
+    weight += 0.25;
+  }
+  return weight > 0 ? score / weight : 0;
+}
 
-  if (!entries.length) return null;
-  const best = entries.reduce((a, b) => a.dist < b.dist ? a : b);
-  return best.dist <= threshold ? best.img : null;
+async function hashMatch(base64: string, images: LibraryImage[], threshold = 0.75): Promise<LibraryImage | null> {
+  if (!images.length) return null;
+  const inputFeatures = await computeFeatures(base64);
+  const scored = await Promise.all(
+    images.map(async (img) => {
+      try {
+        const features = await computeFeatures(img.b64);
+        return { img, score: featureSimilarity(inputFeatures, features) };
+      } catch {
+        return { img, score: 0 };
+      }
+    })
+  );
+  const best = scored.reduce((a, b) => a.score > b.score ? a : b);
+  return best.score >= threshold ? best.img : null;
 }
 
 function buildJsonPrompt(hasLibrary: boolean): string {
@@ -136,15 +255,17 @@ function buildJsonPrompt(hasLibrary: boolean): string {
 }`;
 }
 
+type GeminiPart = { text: string } | { inlineData: { mimeType: string; data: string } };
+
 async function identifyWithGemini(
   base64: string,
   mediaType: string,
   libraryImages: LibraryImage[]
 ): Promise<Record<string, unknown>> {
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
-  const parts: Parameters<typeof model.generateContent>[0] extends Array<infer T> ? T[] : never[] = [];
+  const parts: GeminiPart[] = [];
 
   if (libraryImages.length > 0) {
     const speciesMap: Record<string, LibraryImage[]> = {};
@@ -154,22 +275,22 @@ async function identifyWithGemini(
     }
     const speciesEntries = Object.entries(speciesMap).slice(0, 12);
 
-    (parts as unknown[]).push({ text: `Tôi có ${speciesEntries.length} loài trong thư viện mẫu:` });
+    parts.push({ text: `Tôi có ${speciesEntries.length} loài trong thư viện mẫu:` });
     for (let i = 0; i < speciesEntries.length; i++) {
       const [name, imgs] = speciesEntries[i];
-      (parts as unknown[]).push({ text: `\nLoài ${i + 1}: "${name}" (${imgs.length} góc chụp)` });
+      parts.push({ text: `\nLoài ${i + 1}: "${name}" (${imgs.length} góc chụp)` });
       for (const img of imgs) {
-        (parts as unknown[]).push({ inlineData: { mimeType: img.mediaType, data: img.b64 } });
+        parts.push({ inlineData: { mimeType: img.mediaType, data: img.b64 } });
       }
     }
-    (parts as unknown[]).push({ text: '\nĐây là ảnh cần nhận dạng:' });
-    (parts as unknown[]).push({ inlineData: { mimeType: mediaType, data: base64 } });
-    (parts as unknown[]).push({
+    parts.push({ text: '\nĐây là ảnh cần nhận dạng:' });
+    parts.push({ inlineData: { mimeType: mediaType, data: base64 } });
+    parts.push({
       text: `Bước 1: So sánh ảnh cần nhận dạng với từng loài trong thư viện. Nếu CÙNG LOÀI, đặt "fromLibrary": true và dùng đúng tên đó.\nBước 2: Nếu không khớp, nhận dạng từ kiến thức của bạn, đặt "fromLibrary": false.\n\n${buildJsonPrompt(true)}`,
     });
   } else {
-    (parts as unknown[]).push({ inlineData: { mimeType: mediaType, data: base64 } });
-    (parts as unknown[]).push({ text: `Nhìn vào ảnh động vật này và trả về thông tin.\n\n${buildJsonPrompt(false)}` });
+    parts.push({ inlineData: { mimeType: mediaType, data: base64 } });
+    parts.push({ text: `Nhìn vào ảnh động vật này và trả về thông tin.\n\n${buildJsonPrompt(false)}` });
   }
 
   const result = await model.generateContent(parts as Parameters<typeof model.generateContent>[0]);
@@ -191,23 +312,25 @@ export async function POST(req: NextRequest) {
     fetchSpeciesDbImages(60),
   ]);
 
-  // No API key at all — hash matching only
-  if (!process.env.ANTHROPIC_API_KEY && !process.env.GEMINI_API_KEY) {
-    const allImages = [...speciesDbImages, ...libraryImages];
-    if (allImages.length === 0) {
-      return NextResponse.json({ found: false, note: 'Chưa có ảnh mẫu trong hệ thống.' });
-    }
-    const match = await hashMatch(base64, allImages);
-    if (match) {
-      return NextResponse.json({ found: true, fromLibrary: !match.slug, name: match.name, scientificName: match.scientificName || '', conservationStatus: match.conservationStatus || '', description: match.description || '', confidence: 'high', ...(match.slug ? { matchedSlug: match.slug } : {}), ...(match.link ? { libraryLink: match.link } : {}) });
-    }
-    return NextResponse.json({ found: false, note: 'Không tìm thấy ảnh khớp trong hệ thống.' });
+  const allImages = [...speciesDbImages, ...libraryImages];
+
+  function matchResponse(match: LibraryImage) {
+    return NextResponse.json({
+      found: true,
+      fromLibrary: !match.slug,
+      name: match.name,
+      scientificName: match.scientificName || '',
+      conservationStatus: match.conservationStatus || '',
+      description: match.description || '',
+      confidence: 'high',
+      ...(match.slug ? { matchedSlug: match.slug } : {}),
+      ...(match.link ? { libraryLink: match.link } : {}),
+    });
   }
 
-  // Helper to enrich result with library data
-  function enrichFromLibrary(json: Record<string, unknown>) {
+  function enrichFromAI(json: Record<string, unknown>) {
     if (json.fromLibrary && json.name) {
-      const matched = [...speciesDbImages, ...libraryImages].find((l) => l.name === json.name);
+      const matched = allImages.find((l) => l.name === json.name);
       if (matched) {
         if (matched.slug) json.matchedSlug = matched.slug;
         if (matched.link) json.libraryLink = matched.link;
@@ -219,16 +342,6 @@ export async function POST(req: NextRequest) {
     return json;
   }
 
-  // Helper: hash matching fallback
-  async function hashFallback() {
-    const allImages = [...speciesDbImages, ...libraryImages];
-    const match = await hashMatch(base64, allImages);
-    if (match) {
-      return NextResponse.json({ found: true, fromLibrary: !match.slug, name: match.name, scientificName: match.scientificName || '', conservationStatus: match.conservationStatus || '', description: match.description || '', confidence: 'high', ...(match.slug ? { matchedSlug: match.slug } : {}), ...(match.link ? { libraryLink: match.link } : {}) });
-    }
-    return NextResponse.json({ found: false, note: 'Không tìm thấy ảnh khớp trong hệ thống.' });
-  }
-
   // 1. Try Anthropic Claude
   if (process.env.ANTHROPIC_API_KEY) {
     const speciesMap: Record<string, LibraryImage[]> = {};
@@ -237,26 +350,21 @@ export async function POST(req: NextRequest) {
       speciesMap[img.name].push(img);
     }
     const speciesEntries = Object.entries(speciesMap).slice(0, 12);
-
-    let messageContent: Anthropic.ContentBlockParam[];
-    if (speciesEntries.length > 0) {
-      messageContent = [
-        { type: 'text', text: `Tôi có ${speciesEntries.length} loài trong thư viện mẫu:` },
-        ...speciesEntries.flatMap<Anthropic.ContentBlockParam>(([name, imgs], i) => [
-          { type: 'text', text: `\nLoài ${i + 1}: "${name}" (${imgs.length} góc chụp)` },
-          ...imgs.map(img => ({ type: 'image', source: { type: 'base64', media_type: img.mediaType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif', data: img.b64 } } as Anthropic.ContentBlockParam)),
-        ]),
-        { type: 'text', text: '\nĐây là ảnh cần nhận dạng:' },
-        { type: 'image', source: { type: 'base64', media_type: mediaType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif', data: base64 } },
-        { type: 'text', text: `Bước 1: So sánh với thư viện. Nếu CÙNG LOÀI đặt "fromLibrary": true.\nBước 2: Nếu không khớp nhận dạng từ kiến thức, đặt "fromLibrary": false.\n\n${buildJsonPrompt(true)}` },
-      ];
-    } else {
-      messageContent = [
-        { type: 'image', source: { type: 'base64', media_type: mediaType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif', data: base64 } },
-        { type: 'text', text: `Nhìn vào ảnh động vật này.\n\n${buildJsonPrompt(false)}` },
-      ];
-    }
-
+    const messageContent: Anthropic.ContentBlockParam[] = speciesEntries.length > 0
+      ? [
+          { type: 'text', text: `Tôi có ${speciesEntries.length} loài trong thư viện mẫu:` },
+          ...speciesEntries.flatMap<Anthropic.ContentBlockParam>(([name, imgs], i) => [
+            { type: 'text', text: `\nLoài ${i + 1}: "${name}" (${imgs.length} góc chụp)` },
+            ...imgs.map(img => ({ type: 'image', source: { type: 'base64', media_type: img.mediaType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif', data: img.b64 } } as Anthropic.ContentBlockParam)),
+          ]),
+          { type: 'text', text: '\nĐây là ảnh cần nhận dạng:' },
+          { type: 'image', source: { type: 'base64', media_type: mediaType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif', data: base64 } },
+          { type: 'text', text: `Bước 1: So sánh ảnh cần nhận dạng với từng loài trong thư viện. Nếu CÙNG LOÀI, đặt "fromLibrary": true và dùng đúng tên đó.\nBước 2: Nếu không khớp, nhận dạng từ kiến thức của bạn, đặt "fromLibrary": false.\n\n${buildJsonPrompt(true)}` },
+        ]
+      : [
+          { type: 'image', source: { type: 'base64', media_type: mediaType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif', data: base64 } },
+          { type: 'text', text: `Nhìn vào ảnh động vật này.\n\n${buildJsonPrompt(false)}` },
+        ];
     try {
       const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
       const message = await client.messages.create({
@@ -266,9 +374,9 @@ export async function POST(req: NextRequest) {
       });
       const raw = message.content[0].type === 'text' ? message.content[0].text.trim() : '{}';
       const json = JSON.parse(raw.replace(/^```json\n?|```$/g, '').trim());
-      return NextResponse.json(enrichFromLibrary(json));
+      return NextResponse.json(enrichFromAI(json));
     } catch {
-      // Claude failed — try Gemini next
+      // fall through to Gemini
     }
   }
 
@@ -276,12 +384,17 @@ export async function POST(req: NextRequest) {
   if (process.env.GEMINI_API_KEY) {
     try {
       const json = await identifyWithGemini(base64, mediaType, libraryImages);
-      return NextResponse.json(enrichFromLibrary(json));
+      return NextResponse.json(enrichFromAI(json));
     } catch {
-      // Gemini failed — fall back to hash matching
+      // fall through to DB
     }
   }
 
-  // 3. Hash matching fallback
-  return hashFallback();
+  // 3. Hash match against DB
+  if (allImages.length > 0) {
+    const match = await hashMatch(base64, allImages);
+    if (match) return matchResponse(match);
+  }
+
+  return NextResponse.json({ found: false, note: 'Không tìm thấy loài khớp trong hệ thống.' });
 }
