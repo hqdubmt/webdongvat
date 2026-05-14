@@ -278,7 +278,7 @@ export default function NewSpeciesPage() {
               Tiếp tục chỉnh sửa (thêm ảnh, tọa độ...)
             </button>
             <button
-              onClick={() => router.push('/admin')}
+              onClick={() => { router.refresh(); router.push('/admin'); }}
               className="flex items-center justify-center gap-2 w-full text-gray-400 hover:text-gray-600 text-sm py-1"
             >
               ← Về danh sách loài
