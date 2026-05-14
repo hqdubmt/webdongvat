@@ -12,7 +12,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-Admin@123456}
       POSTGRES_DB: ${POSTGRES_DB:-wildlife_db}
     ports:
-      - "5432:5432"
+      - "54352:5432"
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
     healthcheck:

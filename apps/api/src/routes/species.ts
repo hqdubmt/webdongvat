@@ -4,6 +4,7 @@ import { prisma } from '../services/prisma';
 import { getCache, setCache, deleteCache, deleteCachePattern } from '../services/redis';
 import { uploadFile, deleteFile } from '../services/minio';
 import { createError } from '../middleware/errorHandler';
+import { requireAuth } from '../middleware/requireAuth';
 
 const router = Router();
 
@@ -97,7 +98,7 @@ router.get('/:slug', async (req: Request, res: Response, next: NextFunction) => 
 });
 
 // POST /api/species - create species
-router.post('/', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { slug, name, scientificName, description, conservationStatus, locations } = req.body;
 
@@ -150,7 +151,7 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
 });
 
 // PUT /api/species/:slug - update species
-router.put('/:slug', async (req: Request, res: Response, next: NextFunction) => {
+router.put('/:slug', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { slug } = req.params;
     const { name, scientificName, description, conservationStatus } = req.body;
@@ -182,7 +183,7 @@ router.put('/:slug', async (req: Request, res: Response, next: NextFunction) => 
 });
 
 // DELETE /api/species/:slug - delete species
-router.delete('/:slug', async (req: Request, res: Response, next: NextFunction) => {
+router.delete('/:slug', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { slug } = req.params;
 
@@ -220,6 +221,7 @@ router.delete('/:slug', async (req: Request, res: Response, next: NextFunction) 
 // POST /api/species/:slug/images - upload image
 router.post(
   '/:slug/images',
+  requireAuth,
   upload.single('image'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -279,7 +281,7 @@ router.post(
 );
 
 // PATCH /api/species/:slug/images/:imageId/primary - set as primary image
-router.patch('/:slug/images/:imageId/primary', async (req: Request, res: Response, next: NextFunction) => {
+router.patch('/:slug/images/:imageId/primary', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { slug, imageId } = req.params;
 
@@ -316,7 +318,7 @@ router.patch('/:slug/images/:imageId/primary', async (req: Request, res: Respons
 });
 
 // DELETE /api/species/:slug/images/:imageId - delete image
-router.delete('/:slug/images/:imageId', async (req: Request, res: Response, next: NextFunction) => {
+router.delete('/:slug/images/:imageId', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { slug, imageId } = req.params;
 
@@ -353,7 +355,7 @@ router.delete('/:slug/images/:imageId', async (req: Request, res: Response, next
 });
 
 // POST /api/species/:slug/locations - add location
-router.post('/:slug/locations', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/:slug/locations', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { slug } = req.params;
     const { latitude, longitude, placeName } = req.body;
@@ -384,7 +386,7 @@ router.post('/:slug/locations', async (req: Request, res: Response, next: NextFu
 });
 
 // DELETE /api/species/:slug/locations/:locationId - delete location
-router.delete('/:slug/locations/:locationId', async (req: Request, res: Response, next: NextFunction) => {
+router.delete('/:slug/locations/:locationId', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { slug, locationId } = req.params;
 
@@ -426,6 +428,7 @@ const videoUpload = multer({
 // POST /api/species/:slug/videos - add video (URL or file upload)
 router.post(
   '/:slug/videos',
+  requireAuth,
   (req: Request, res: Response, next: NextFunction) => {
     // Only run multer if it's a multipart request (file upload)
     if (req.is('multipart/form-data')) {
@@ -474,7 +477,7 @@ router.post(
 );
 
 // PATCH /api/species/:slug/videos/:videoId/primary - set primary video
-router.patch('/:slug/videos/:videoId/primary', async (req: Request, res: Response, next: NextFunction) => {
+router.patch('/:slug/videos/:videoId/primary', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { slug, videoId } = req.params;
     const species = await prisma.species.findUnique({ where: { slug } });
@@ -492,7 +495,7 @@ router.patch('/:slug/videos/:videoId/primary', async (req: Request, res: Respons
 });
 
 // DELETE /api/species/:slug/videos/:videoId - delete video
-router.delete('/:slug/videos/:videoId', async (req: Request, res: Response, next: NextFunction) => {
+router.delete('/:slug/videos/:videoId', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { slug, videoId } = req.params;
     const species = await prisma.species.findUnique({ where: { slug } });
