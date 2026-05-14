@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { NextResponse } from 'next/server';
+import { isApiOpen, tripBreaker, isCapacityError, hasValidKey } from '@/lib/ai-breaker';
 
 const API_BASE = process.env.API_INTERNAL_URL || 'http://localhost:3001';
 
@@ -22,13 +23,6 @@ function buildFallbackDescription(name: string, scientificName: string, conserva
   return `${name} (${scientificName}) là một loài động vật hoang dã. ${statusText}Chưa có mô tả chi tiết trong hệ thống. Vui lòng cập nhật thông tin sau khi có nguồn tham khảo phù hợp.`;
 }
 
-// Circuit breaker: skip API for 5 min after capacity/quota error
-const apiBreaker: Record<string, number> = {};
-const BREAKER_TTL = 5 * 60 * 1000;
-const isApiOpen = (name: string) => !apiBreaker[name] || Date.now() > apiBreaker[name];
-const tripBreaker = (name: string) => { apiBreaker[name] = Date.now() + BREAKER_TTL; };
-const isCapacityError = (e: unknown) =>
-  /429|402|quota|credit|exceeded|RESOURCE_EXHAUSTED|insufficient|balance|billing/i.test(String(e));
 
 export async function POST(req: Request) {
   const { name, scientificName, conservationStatus, slug } = await req.json();
@@ -39,9 +33,9 @@ export async function POST(req: Request) {
   const prompt = buildPrompt(name, scientificName, conservationStatus);
 
   // 1. Try Anthropic
-  if (process.env.ANTHROPIC_API_KEY && isApiOpen('anthropic')) {
+  if (hasValidKey('anthropic') && isApiOpen('anthropic')) {
     try {
-      const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
       const message = await client.messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 600,
@@ -56,9 +50,9 @@ export async function POST(req: Request) {
   }
 
   // 2. Try Gemini
-  if (process.env.GEMINI_API_KEY && isApiOpen('gemini')) {
+  if (hasValidKey('gemini') && isApiOpen('gemini')) {
     try {
-      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
       const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
       const result = await model.generateContent(prompt);
       const text = result.response.text().trim();

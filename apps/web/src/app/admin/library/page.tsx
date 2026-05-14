@@ -166,6 +166,7 @@ export default function LibraryPage() {
     setDeletingKey(img.key);
     try {
       await fetch(`/api/samples/${btoa(img.key)}`, { method: 'DELETE' });
+      await fetch('/api/ai/identify/reset', { method: 'POST' });
       setImages((p) => p.filter((i) => i.key !== img.key));
     } finally {
       setDeletingKey(null);
@@ -178,6 +179,7 @@ export default function LibraryPage() {
     setDeletingKey(groupKey);
     try {
       await Promise.all(imgs.map(img => fetch(`/api/samples/${btoa(img.key)}`, { method: 'DELETE' })));
+      await fetch('/api/ai/identify/reset', { method: 'POST' });
       setImages((p) => p.filter((i) => !imgs.some(g => g.key === i.key)));
       setScanResults((p) => { const n = { ...p }; delete n[groupKey]; return n; });
     } finally {

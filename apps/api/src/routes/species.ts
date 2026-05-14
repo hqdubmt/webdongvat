@@ -48,6 +48,23 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   }
 });
 
+// GET /api/species/check?name=...&scientificName=... - check for duplicates
+router.get('/check', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { name, scientificName } = req.query as { name?: string; scientificName?: string };
+    const conditions: object[] = [];
+    if (name) conditions.push({ name: { equals: name, mode: 'insensitive' } });
+    if (scientificName) conditions.push({ scientificName: { equals: scientificName, mode: 'insensitive' } });
+    if (conditions.length === 0) return res.json({ duplicate: false });
+
+    const existing = await prisma.species.findFirst({ where: { OR: conditions }, select: { slug: true, name: true, scientificName: true } });
+    if (existing) return res.json({ duplicate: true, existing });
+    return res.json({ duplicate: false });
+  } catch (err) {
+    return next(err);
+  }
+});
+
 // GET /api/species/:slug - species detail
 router.get('/:slug', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -90,7 +107,17 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
 
     const existing = await prisma.species.findUnique({ where: { slug } });
     if (existing) {
-      return next(createError('A species with this slug already exists', 409));
+      return next(createError('Slug này đã tồn tại', 409));
+    }
+
+    const dupName = await prisma.species.findFirst({ where: { name: { equals: name, mode: 'insensitive' } }, select: { slug: true } });
+    if (dupName) {
+      return next(createError(`Tên loài "${name}" đã tồn tại trong hệ thống`, 409));
+    }
+
+    const dupSci = await prisma.species.findFirst({ where: { scientificName: { equals: scientificName, mode: 'insensitive' } }, select: { slug: true } });
+    if (dupSci) {
+      return next(createError(`Tên khoa học "${scientificName}" đã tồn tại trong hệ thống`, 409));
     }
 
     const species = await prisma.species.create({
@@ -375,6 +402,7 @@ router.delete('/:slug/locations/:locationId', async (req: Request, res: Response
     }
 
     await prisma.speciesLocation.delete({ where: { id: location.id } });
+    await deleteCache('species:list');
     await deleteCache(`species:detail:${slug}`);
 
     return res.json({ message: 'Location deleted successfully' });

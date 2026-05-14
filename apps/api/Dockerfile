@@ -25,14 +25,13 @@ RUN node node_modules/.bin/tsc \
     --resolveJsonModule \
     --skipLibCheck \
     --outDir /tmp/seed-out \
-    2>/dev/null \
-  && cp /tmp/seed-out/prisma/seed.js dist/seed.js \
+  && cp /tmp/seed-out/seed.js dist/seed.js \
   || echo "Seed compile skipped"
 
 # Production stage
 FROM node:20-alpine AS runner
 
-RUN apk add --no-cache curl
+RUN apk add --no-cache curl openssl
 
 WORKDIR /app
 

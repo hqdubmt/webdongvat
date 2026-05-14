@@ -38,6 +38,8 @@ export default function NewSpeciesPage() {
   const [slugManual, setSlugManual] = useState(false);
   const [created, setCreated] = useState<{ slug: string; name: string } | null>(null);
   const [slugStatus, setSlugStatus] = useState<'idle' | 'checking' | 'taken' | 'free'>('idle');
+  const [nameStatus, setNameStatus] = useState<'idle' | 'checking' | 'taken' | 'free'>('idle');
+  const [sciStatus, setSciStatus] = useState<'idle' | 'checking' | 'taken' | 'free'>('idle');
   const [identifying, setIdentifying] = useState(false);
   const [identified, setIdentified] = useState<IdentifyResult | null>(null);
   const scanRef = useRef<HTMLInputElement>(null);
@@ -104,6 +106,34 @@ export default function NewSpeciesPage() {
     }, 500);
     return () => clearTimeout(timer);
   }, [form.slug]);
+
+  useEffect(() => {
+    const name = form.name.trim();
+    if (!name) { setNameStatus('idle'); return; }
+    setNameStatus('checking');
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/species/check?name=${encodeURIComponent(name)}`);
+        const data = await res.json();
+        setNameStatus(data.duplicate ? 'taken' : 'free');
+      } catch { setNameStatus('idle'); }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [form.name]);
+
+  useEffect(() => {
+    const sci = form.scientificName.trim();
+    if (!sci) { setSciStatus('idle'); return; }
+    setSciStatus('checking');
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/species/check?scientificName=${encodeURIComponent(sci)}`);
+        const data = await res.json();
+        setSciStatus(data.duplicate ? 'taken' : 'free');
+      } catch { setSciStatus('idle'); }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [form.scientificName]);
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0] ?? null;
@@ -174,6 +204,14 @@ export default function NewSpeciesPage() {
     e.preventDefault();
     if (!form.name || !form.scientificName || !form.slug) {
       setError('Vui lòng điền đầy đủ tên loài, tên khoa học và slug.');
+      return;
+    }
+    if (nameStatus === 'taken') {
+      setError('Tên loài này đã tồn tại trong hệ thống.');
+      return;
+    }
+    if (sciStatus === 'taken') {
+      setError('Tên khoa học này đã tồn tại trong hệ thống.');
       return;
     }
     if (slugStatus === 'taken') {
@@ -326,26 +364,42 @@ export default function NewSpeciesPage() {
           <label className="block text-sm font-medium text-gray-700 mb-1">
             Tên loài <span className="text-red-500">*</span>
           </label>
-          <input
-            name="name"
-            value={form.name}
-            onChange={handleChange}
-            placeholder="VD: Sao La"
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-          />
+          <div className="relative">
+            <input
+              name="name"
+              value={form.name}
+              onChange={handleChange}
+              placeholder="VD: Sao La"
+              className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 pr-8 ${nameStatus === 'taken' ? 'border-red-400 focus:ring-red-400' : nameStatus === 'free' ? 'border-green-400 focus:ring-green-400' : 'border-gray-300 focus:ring-green-500'}`}
+            />
+            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-sm">
+              {nameStatus === 'checking' && <svg className="animate-spin w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>}
+              {nameStatus === 'taken' && <span className="text-red-500">✕</span>}
+              {nameStatus === 'free' && <span className="text-green-500">✓</span>}
+            </span>
+          </div>
+          {nameStatus === 'taken' && <p className="text-xs text-red-600 mt-1">⚠ Tên loài này đã tồn tại trong hệ thống</p>}
         </div>
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
             Tên khoa học <span className="text-red-500">*</span>
           </label>
-          <input
-            name="scientificName"
-            value={form.scientificName}
-            onChange={handleChange}
-            placeholder="VD: Pseudoryx nghetinhensis"
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm italic focus:outline-none focus:ring-2 focus:ring-green-500"
-          />
+          <div className="relative">
+            <input
+              name="scientificName"
+              value={form.scientificName}
+              onChange={handleChange}
+              placeholder="VD: Pseudoryx nghetinhensis"
+              className={`w-full border rounded-lg px-3 py-2 text-sm italic focus:outline-none focus:ring-2 pr-8 ${sciStatus === 'taken' ? 'border-red-400 focus:ring-red-400' : sciStatus === 'free' ? 'border-green-400 focus:ring-green-400' : 'border-gray-300 focus:ring-green-500'}`}
+            />
+            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-sm">
+              {sciStatus === 'checking' && <svg className="animate-spin w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>}
+              {sciStatus === 'taken' && <span className="text-red-500">✕</span>}
+              {sciStatus === 'free' && <span className="text-green-500">✓</span>}
+            </span>
+          </div>
+          {sciStatus === 'taken' && <p className="text-xs text-red-600 mt-1">⚠ Tên khoa học này đã tồn tại trong hệ thống</p>}
           {form.scientificName && (
             <div className="flex items-center gap-3 mt-1.5">
               <span className="text-xs text-gray-400">Tra cứu:</span>

@@ -17,6 +17,17 @@ export function getClient(): Minio.Client {
   return client;
 }
 
+export async function streamToBase64(stream: AsyncIterable<Buffer | Uint8Array>): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  return Buffer.concat(chunks).toString('base64');
+}
+
+export function objectKeyToMediaType(key: string): string {
+  const ext = key.split('.').pop()?.toLowerCase() || 'jpg';
+  return ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+}
+
 export function publicUrl(objectKey: string): string {
   const base = process.env.MINIO_PUBLIC_URL
     ? process.env.MINIO_PUBLIC_URL.replace(/\/$/, '')

@@ -1,19 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { NextRequest, NextResponse } from 'next/server';
-import { getClient, BUCKET, readSampleIndex } from '@/lib/minio';
+import { getClient, BUCKET, readSampleIndex, streamToBase64, objectKeyToMediaType } from '@/lib/minio';
+import { isApiOpen, tripBreaker, isCapacityError, hasValidKey } from '@/lib/ai-breaker';
+import { hashCache, type CachedEntry, type CachedImage, type ImageFeatures } from '@/lib/hash-cache';
 import sharp from 'sharp';
 
-type LibraryImage = {
-  name: string;
-  scientificName?: string;
-  conservationStatus?: string;
-  description?: string;
-  link?: string;
-  slug?: string;
-  b64: string;
-  mediaType: string;
-};
+type LibraryImage = CachedImage;
 
 async function fetchLibraryImages(limit = 30): Promise<LibraryImage[]> {
   try {
@@ -25,11 +18,8 @@ async function fetchLibraryImages(limit = 30): Promise<LibraryImage[]> {
       namedEntries.slice(0, limit).map(async ([key, entry]) => {
         try {
           const stream = await getClient().getObject(BUCKET, key);
-          const chunks: Buffer[] = [];
-          for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-          const b64 = Buffer.concat(chunks).toString('base64');
-          const ext = key.split('.').pop()?.toLowerCase() || 'jpg';
-          const mediaType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+          const b64 = await streamToBase64(stream);
+          const mediaType = objectKeyToMediaType(key);
           return { name: entry.name, scientificName: entry.scientificName, conservationStatus: entry.conservationStatus, description: entry.description, link: entry.link, b64, mediaType };
         } catch {
           return null;
@@ -54,21 +44,32 @@ async function fetchSpeciesDbImages(limit = 60): Promise<LibraryImage[]> {
       scientificName: string;
       description?: string | null;
       conservationStatus?: string | null;
-      images?: Array<{ objectKey: string; isPrimary: boolean }>;
+      images?: Array<{ objectKey: string; url?: string; isPrimary: boolean }>;
     }>;
 
     const results = await Promise.all(
       speciesList.slice(0, limit).map(async (sp) => {
         const imgs = sp.images ?? [];
         const primaryImg = imgs.find((i) => i.isPrimary) ?? imgs[0];
-        if (!primaryImg?.objectKey) return null;
+        if (!primaryImg) return null;
         try {
-          const stream = await getClient().getObject(BUCKET, primaryImg.objectKey);
-          const chunks: Buffer[] = [];
-          for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-          const b64 = Buffer.concat(chunks).toString('base64');
-          const ext = primaryImg.objectKey.split('.').pop()?.toLowerCase() || 'jpg';
-          const mediaType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+          let b64: string;
+          let mediaType: string;
+          // Try MinIO first, fall back to external URL
+          try {
+            const stream = await getClient().getObject(BUCKET, primaryImg.objectKey);
+            b64 = await streamToBase64(stream);
+            mediaType = objectKeyToMediaType(primaryImg.objectKey);
+          } catch {
+            // MinIO failed — try external URL
+            if (!primaryImg.url) return null;
+            const r = await fetch(primaryImg.url, { signal: AbortSignal.timeout(3000) });
+            if (!r.ok) return null;
+            const buf = Buffer.from(await r.arrayBuffer());
+            b64 = buf.toString('base64');
+            const ct = r.headers.get('content-type') || 'image/jpeg';
+            mediaType = ct.startsWith('image/') ? ct.split(';')[0] : 'image/jpeg';
+          }
           return { name: sp.name, scientificName: sp.scientificName, conservationStatus: sp.conservationStatus || undefined, description: sp.description || undefined, slug: sp.slug, b64, mediaType };
         } catch {
           return null;
@@ -173,8 +174,6 @@ async function computeColorHistogram(b64: string): Promise<number[] | null> {
   }
 }
 
-type ImageFeatures = { pHash: boolean[] | null; dHash: boolean[] | null; colorHist: number[] | null };
-
 // Decode and resize once to avoid 3× full JPEG decodes per image
 async function computeFeatures(b64: string): Promise<ImageFeatures> {
   try {
@@ -225,28 +224,7 @@ function featureSimilarity(f1: ImageFeatures, f2: ImageFeatures): number {
   return weight > 0 ? score / weight : 0;
 }
 
-// ── Module-level caches (persist across requests in same process) ─────────────
-
-type CachedEntry = { img: LibraryImage; features: ImageFeatures };
-const hashCache: { entries: CachedEntry[] | null; expiry: number } = { entries: null, expiry: 0 };
-const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
-
-// Circuit breaker: skip API if it recently failed with a capacity/quota error
-const apiBreaker: Record<string, number> = {}; // key → timestamp when backoff expires
-const BREAKER_TTL = 5 * 60 * 1000; // 5 minutes backoff
-
-function isApiOpen(name: string): boolean {
-  return !apiBreaker[name] || Date.now() > apiBreaker[name];
-}
-
-function tripBreaker(name: string): void {
-  apiBreaker[name] = Date.now() + BREAKER_TTL;
-}
-
-function isCapacityError(e: unknown): boolean {
-  const msg = String(e);
-  return /429|402|quota|credit|exceeded|RESOURCE_EXHAUSTED|insufficient|balance|billing/i.test(msg);
-}
+const CACHE_TTL = 10 * 60 * 1000;
 
 async function getOrBuildCache(): Promise<CachedEntry[]> {
   if (hashCache.entries && Date.now() < hashCache.expiry) return hashCache.entries;
@@ -368,7 +346,7 @@ export async function POST(req: NextRequest) {
   }
 
   // 1. Try Anthropic Claude
-  if (process.env.ANTHROPIC_API_KEY && isApiOpen('anthropic')) {
+  if (hasValidKey('anthropic') && isApiOpen('anthropic')) {
     const speciesMap: Record<string, LibraryImage[]> = {};
     for (const img of libraryImages) {
       if (!speciesMap[img.name]) speciesMap[img.name] = [];
@@ -391,7 +369,7 @@ export async function POST(req: NextRequest) {
           { type: 'text', text: `Nhìn vào ảnh động vật này.\n\n${buildJsonPrompt(false)}` },
         ];
     try {
-      const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
       const message = await client.messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 1024,
@@ -407,7 +385,7 @@ export async function POST(req: NextRequest) {
   }
 
   // 2. Try Gemini
-  if (process.env.GEMINI_API_KEY && isApiOpen('gemini')) {
+  if (hasValidKey('gemini') && isApiOpen('gemini')) {
     try {
       const json = await identifyWithGemini(base64, mediaType, libraryImages);
       return NextResponse.json({ ...enrichFromAI(json), source: 'gemini' });
