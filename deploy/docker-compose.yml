@@ -57,7 +57,7 @@ services:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-admin}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-Minio@123456789}
     ports:
-      - "9000:9000"
+      - "9002:9000"
       - "9100:9100"
     volumes:
       - minio_data:/data

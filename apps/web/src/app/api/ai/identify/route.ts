@@ -331,19 +331,22 @@ export async function POST(req: NextRequest) {
 
   // Look up slug/metadata for a species name across all loaded images
   function enrichFromAI(json: Record<string, unknown>): Record<string, unknown> {
-    if (json.fromLibrary && json.name) {
+    if (json.found && json.name) {
       const searchIn = hashCache.entries ? hashCache.entries.map(e => e.img) : libraryImages;
       const matched = searchIn.find(img => img.name === json.name);
       if (matched) {
         if (matched.slug) json.matchedSlug = matched.slug;
         if (matched.link) json.libraryLink = matched.link;
-        if (matched.scientificName) json.scientificName = matched.scientificName;
-        if (matched.conservationStatus) json.conservationStatus = matched.conservationStatus;
-        if (matched.description) json.description = matched.description;
+        if (!json.scientificName && matched.scientificName) json.scientificName = matched.scientificName;
+        if (!json.conservationStatus && matched.conservationStatus) json.conservationStatus = matched.conservationStatus;
+        if (!json.description && matched.description) json.description = matched.description;
+        if (matched.slug || matched.link) json.fromLibrary = true;
       }
     }
     return json;
   }
+
+  const hasAI = hasValidKey('anthropic') || hasValidKey('gemini');
 
   // 1. Try Anthropic Claude
   if (hasValidKey('anthropic') && isApiOpen('anthropic')) {
@@ -391,11 +394,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ...enrichFromAI(json), source: 'gemini' });
     } catch (e) {
       if (isCapacityError(e)) tripBreaker('gemini');
-      // fall through to hash match
+      // fall through
     }
   }
 
-  // 3. Hash match using cached features (waits for cache if still building)
+  // 3. Hash matching — always run as last resort (covers: no AI keys, circuit breaker open, or AI failed)
   const cached = await cachePromise;
   const match = await hashMatchCached(base64, cached);
   if (match) {
@@ -413,5 +416,8 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  return NextResponse.json({ found: false, source: 'not_found', note: 'Không tìm thấy loài khớp trong hệ thống.' });
+  if (!hasAI) {
+    return NextResponse.json({ found: false, source: 'not_found', note: 'Không tìm thấy loài khớp trong hệ thống.' });
+  }
+  return NextResponse.json({ found: false, source: 'ai_unavailable', note: 'Dịch vụ AI tạm thời không khả dụng, vui lòng thử lại sau.' });
 }

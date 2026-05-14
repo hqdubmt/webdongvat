@@ -6,6 +6,8 @@ export async function POST() {
     httpOnly: true,
     maxAge: 0,
     path: '/',
+    expires: new Date(0),
   });
+  res.headers.set('Cache-Control', 'no-store');
   return res;
 }

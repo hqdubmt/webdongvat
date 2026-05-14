@@ -4,6 +4,8 @@ import { getCurrentUser } from '@/lib/auth';
 
 export const metadata: Metadata = { title: 'Quản trị' };
 
+export const dynamic = 'force-dynamic';
+
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const user = await getCurrentUser();
 

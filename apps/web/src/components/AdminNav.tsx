@@ -16,7 +16,7 @@ export default function AdminNav({ role, displayName }: AdminNavProps) {
 
   async function handleLogout() {
     await fetch('/api/auth/logout', { method: 'POST' });
-    router.push('/login');
+    window.location.replace('/login');
   }
 
   return (

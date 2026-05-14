@@ -4,7 +4,7 @@ import { useState, useRef } from 'react';
 
 interface ScanResult {
   found: boolean;
-  source?: 'anthropic' | 'gemini' | 'hash_match' | 'not_found';
+  source?: 'anthropic' | 'gemini' | 'hash_match' | 'not_found' | 'ai_unavailable';
   fromLibrary?: boolean;
   libraryLink?: string;
   matchedSlug?: string;

@@ -7,6 +7,7 @@ import SpeciesDetailPanel from './SpeciesDetailPanel';
 
 interface ScanResult {
   found: boolean;
+  source?: 'anthropic' | 'gemini' | 'hash_match' | 'not_found' | 'ai_unavailable';
   fromLibrary?: boolean;
   libraryLink?: string;
   name?: string;
